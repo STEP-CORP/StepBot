@@ -26,6 +26,10 @@ class AppSettings(BaseModel):
     # Git short-SHA baked into the image at build time (install.sh/update.sh --build-arg),
     # used by the update checker to compare against GitHub. Empty in dev / source runs.
     build_sha: str = ""
+    # Absolute path of the repo ON THE HOST (install.sh/update.sh write it into .env). The
+    # containers only ever see /app, so without it the bot had to print a placeholder folder
+    # name, and operators typed `cd HUB-BOT` on a machine where the clone sits elsewhere.
+    host_repo_dir: str = ""
     # Telegram ids granted OWNER on first contact. NoDecode: take the raw env string as-is
     # (pydantic-settings would otherwise JSON-decode APP__OWNER_IDS, so a plain `898...` becomes
     # an int and fails "not a list"). The validator below accepts "898", "898,123", "898 123".

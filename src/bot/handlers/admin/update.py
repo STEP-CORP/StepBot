@@ -37,7 +37,11 @@ async def screen(cb: CallbackQuery, container: AppContainer) -> None:
     await cb.answer()
     repo, branch, auto = await _read_cfg(container)
     info = await check_for_update(repo, branch, container.settings.app.build_sha)
-    cur = info.current or "неизвестна (образ без build-arg)"
+    from src.core.constants import APP_VERSION
+
+    # The image may be built without the build-arg — then the exact revision is unknown, but the
+    # product version still is: a bare "неизвестна" scares the operator and tells them nothing.
+    cur = info.current or f"{APP_VERSION} (ревизия не зашита в образ)"
     if not info.latest:
         text = (
             "🔄 <b>Обновление</b>\n\n"
@@ -98,13 +102,16 @@ async def apply(cb: CallbackQuery, container: AppContainer) -> None:
                 "После этого кнопка «Обновить» заработает (правка одноразовая)."
             )
         else:
+            # The real install path, not a placeholder: the folder name differs per install, and
+            # `cd HUB-BOT` ended in "No such file or directory" on the operator's machine.
+            where = container.settings.app.host_repo_dir or "<папка бота>"
             text = (
                 "⚠️ <b>Авто-обновление недоступно</b>\n\n"
                 "Модуль обновлений (updater) не запущен на этом сервере — так бывает у "
                 "установок, сделанных до его появления.\n\n"
                 "Выполните на сервере <b>один раз</b> — скрипт сам включит модуль, и дальше "
                 "кнопка «Обновить» будет работать:\n"
-                "<code>cd &lt;папка бота&gt; &amp;&amp; ./scripts/update.sh</code>"
+                f"<code>cd {hesc(where)} &amp;&amp; ./scripts/update.sh</code>"
             )
     await show_screen(cb, text, back_kb())
     await cb.answer()

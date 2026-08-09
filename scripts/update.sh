@@ -70,6 +70,18 @@ ensure_updater_profile() {
 }
 ensure_updater_profile
 
+# Путь установки на хосте — бот показывает его оператору вместо угадывания имени папки
+# (`cd HUB-BOT` кончался «No such file or directory» там, где клон лежит в другом месте).
+ensure_host_repo_dir() {
+  local here; here=$(pwd)
+  if grep -qE '^APP__HOST_REPO_DIR=' .env 2>/dev/null; then
+    sed -i.bak -E "s|^APP__HOST_REPO_DIR=.*|APP__HOST_REPO_DIR=${here}|" .env && rm -f .env.bak
+  else
+    printf '\nAPP__HOST_REPO_DIR=%s\n' "$here" >>.env
+  fi
+}
+ensure_host_repo_dir
+
 notify_owner() { # best-effort Telegram DM of the update outcome to the owners; never fails us
   command -v curl >/dev/null 2>&1 || return 0
   local text=$1 token ids id

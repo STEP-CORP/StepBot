@@ -118,7 +118,10 @@ async def check_for_update(
         return empty
     url = f"{_GITHUB_API}/repos/{repo}/commits/{branch or 'main'}"
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        # follow_redirects: a RENAMED repo answers 301 with the new location. Without this every
+        # already-installed bot (whose saved UPDATE_REPO still holds the old name) reported
+        # "GitHub check failed" forever.
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             r = await client.get(url, headers={"Accept": "application/vnd.github+json"})
         if r.status_code != 200:
             log.info("update check non-200", status=r.status_code)

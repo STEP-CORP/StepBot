@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # VPN-HUB BOT — one-command install.
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/HUB-DEVWORK/HUB-BOT/main/scripts/install.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/STEP-CORP/StepBot/main/scripts/install.sh)
 #
-# (или из клона: git clone https://github.com/HUB-DEVWORK/HUB-BOT.git && cd HUB-BOT && ./scripts/install.sh)
+# (или из клона: git clone https://github.com/STEP-CORP/StepBot.git && cd StepBot && ./scripts/install.sh)
 #
 # Asks only for the bot token (and optionally a domain); generates every secret,
 # starts the whole stack in Docker and prints the cabinet URL + admin password.
@@ -72,12 +72,15 @@ if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/../docker/compose.prod.yml" ]; th
     command -v apt-get >/dev/null 2>&1 || fail "нужен git: установите его и запустите ещё раз"
     run_spin "ставлю git" sh -c "apt-get update -qq && apt-get install -y -qq git"
   fi
-  if [ -d HUB-BOT/.git ]; then
+  if [ -d StepBot/.git ]; then
+    ok "клон StepBot уже есть — использую его"
+  elif [ -d HUB-BOT/.git ]; then
     ok "клон HUB-BOT уже есть — использую его"
+    cd HUB-BOT; exec env VPNHUB_BOOTSTRAPPED=1 bash scripts/install.sh
   else
-    run_spin "git clone HUB-DEVWORK/HUB-BOT" git clone --depth 1 https://github.com/HUB-DEVWORK/HUB-BOT.git HUB-BOT
+    run_spin "git clone STEP-CORP/StepBot" git clone --depth 1 https://github.com/STEP-CORP/StepBot.git StepBot
   fi
-  cd HUB-BOT
+  cd StepBot
   exec env VPNHUB_BOOTSTRAPPED=1 bash scripts/install.sh
 fi
 
@@ -199,6 +202,12 @@ if [ -f .env ]; then
     fi
     ok "включил профиль updater (авто-обновление)"
   fi
+  # путь установки — бот покажет его оператору вместо угадывания имени папки
+  if grep -qE '^APP__HOST_REPO_DIR=' .env; then
+    sed -i.bak -E "s|^APP__HOST_REPO_DIR=.*|APP__HOST_REPO_DIR=$(pwd)|" .env && rm -f .env.bak
+  else
+    printf '\nAPP__HOST_REPO_DIR=%s\n' "$(pwd)" >>.env
+  fi
 else
   ask "Токен бота из @BotFather: "; read -r BOT_TOKEN
   [ -n "$BOT_TOKEN" ] || fail "токен обязателен"
@@ -264,6 +273,7 @@ DOMAIN=${DOMAIN:-:80}
 ACME_EMAIL=${ACME_EMAIL:-}
 WEB_BIND=127.0.0.1:${WEB_PORT}
 COMPOSE_PROFILES=updater$([ -z "${PANEL_URL:-}" ] && echo ",mock")$([ "$CADDY_ON" = 1 ] && echo ",caddy")
+APP__HOST_REPO_DIR=$(pwd)
 ENVEOF
   chmod 600 .env
   FRESH_ENV=1  # generated new secrets -> guard against a stale postgres volume below
