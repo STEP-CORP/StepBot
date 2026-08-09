@@ -289,6 +289,13 @@ PROVIDER_META: dict[PaymentGatewayType, dict[str, Any]] = {
         "ready": True,
         "emoji": "👛",
     },
+    PaymentGatewayType.CISPAY: {
+        "title": "cisPay",
+        "methods": "карта, СБП",
+        "fields": ["shop_id", "api_key", "payment_method"],
+        "ready": True,
+        "emoji": "💠",
+    },
     PaymentGatewayType.RIOPAY: {
         "title": "RioPay",
         "methods": "карта, СБП",
@@ -353,6 +360,7 @@ PROVIDER_EXTRAS: dict[PaymentGatewayType, dict[str, Any]] = {
     PaymentGatewayType.MULENPAY: {"forms": ["card", "sbp"], "brand": "#9C27B0"},
     PaymentGatewayType.LAVA: {"forms": ["card", "sbp"], "brand": "#FF4D00"},
     PaymentGatewayType.KASSA_AI: {"forms": ["card", "sbp"], "brand": "#00BFA5"},
+    PaymentGatewayType.CISPAY: {"forms": ["card", "sbp"], "brand": "#2F80ED"},
     PaymentGatewayType.RIOPAY: {"forms": ["card", "sbp"], "brand": "#E91E63"},
     PaymentGatewayType.ANTILOPAY: {"forms": ["card", "sbp", "sberpay"], "brand": "#00B341"},
     PaymentGatewayType.SEVERPAY: {"forms": ["card", "sbp"], "brand": "#3F51B5"},

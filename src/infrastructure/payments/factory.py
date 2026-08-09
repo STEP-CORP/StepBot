@@ -13,6 +13,7 @@ from src.core.exceptions import GatewayNotConfigured
 from src.infrastructure.payments.base import BasePaymentGateway
 from src.infrastructure.payments.gateways.antilopay import AntilopayGateway
 from src.infrastructure.payments.gateways.aurapay import AurapayGateway
+from src.infrastructure.payments.gateways.cispay import CispayGateway
 from src.infrastructure.payments.gateways.cloudpayments import CloudpaymentsGateway
 from src.infrastructure.payments.gateways.cryptobot import CryptobotGateway
 from src.infrastructure.payments.gateways.cryptomus import CryptomusGateway
@@ -52,6 +53,7 @@ _REGISTRY: dict[PaymentGatewayType, type[BasePaymentGateway]] = {
     PaymentGatewayType.MULENPAY: MulenpayGateway,
     PaymentGatewayType.KASSA_AI: KassaAiGateway,
     PaymentGatewayType.ROLLYPAY: RollypayGateway,
+    PaymentGatewayType.CISPAY: CispayGateway,
     PaymentGatewayType.RIOPAY: RiopayGateway,
     PaymentGatewayType.SEVERPAY: SeverpayGateway,
     PaymentGatewayType.AURAPAY: AurapayGateway,

@@ -83,6 +83,7 @@ ignore = ["B008"]  # FastAPI Depends() in defaults
 # Grace-тесты описаны по-русски (фича обкатана у оператора, термины из его лексикона).
 "tests/unit/test_grace.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/unit/test_plan_rebuild.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/unit/test_cispay_gateway.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/integration/test_admin_api.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/unit/test_screen_text.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/unit/test_telemetry_server.py" = ["RUF001", "RUF002", "RUF003"]

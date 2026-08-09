@@ -178,6 +178,7 @@ class PaymentGatewayType(StrEnum):
     PAYPEAR = "paypear"
     AURAPAY = "aurapay"
     OVERPAY = "overpay"
+    CISPAY = "cispay"
     ROLLYPAY = "rollypay"
 
 
