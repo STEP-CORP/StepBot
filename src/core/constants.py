@@ -13,7 +13,7 @@ UNLIMITED_EXPIRE_YEAR: Final = 2099
 BYTES_PER_GB: Final = 1024**3
 
 # --- identifiers -----------------------------------------------------------
-APP_VERSION: Final = "1.13.0"  # shipped with Remnawave 3.0 support; bump on release
+APP_VERSION: Final = "1.14.0"  # shipped with Remnawave 3.0 support; bump on release
 SHORT_ID_LENGTH: Final = 10  # permanent per-subscription suffix (max column width 16)
 REFERRAL_CODE_LENGTH: Final = 8
 
