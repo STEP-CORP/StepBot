@@ -3,7 +3,8 @@
 Одна команда из папки установки:
 
 ```bash
-cd HUB-BOT && ./scripts/update.sh
+cd ~/StepBot 2>/dev/null || cd ~/HUB-BOT   # папка вашей установки
+./scripts/update.sh
 ```
 
 Порядок шагов выбран так, чтобы сломанное обновление никогда не теряло данные.
@@ -32,7 +33,7 @@ gunzip -c backups/pre-update-<штамп>.sql.gz | \
 ```
 
 ::: warning «required variable DATABASE__PASSWORD is missing a value»
-Голый `docker compose -f docker/compose.prod.yml …` ищет `.env` для подстановки `${…}` в папке compose-файла (`docker/`), а не в корне репозитория — и падает с этой ошибкой. Поэтому запускайте команды через `./scripts/dc.sh` (или добавляйте `--env-file .env` вручную из папки `HUB-BOT`). Если ошибка осталась и через обёртку — значит переменной действительно нет в `.env`; восстановите её из работающего контейнера: `docker exec vpnhub-postgres-1 printenv POSTGRES_PASSWORD`, и впишите значение в `.env` как `DATABASE__PASSWORD=…`.
+Голый `docker compose -f docker/compose.prod.yml …` ищет `.env` для подстановки `${…}` в папке compose-файла (`docker/`), а не в корне репозитория — и падает с этой ошибкой. Поэтому запускайте команды через `./scripts/dc.sh` (или добавляйте `--env-file .env` вручную из корня репозитория). Если ошибка осталась и через обёртку — значит переменной действительно нет в `.env`; восстановите её из работающего контейнера: `docker exec vpnhub-postgres-1 printenv POSTGRES_PASSWORD`, и впишите значение в `.env` как `DATABASE__PASSWORD=…`.
 :::
 
 ::: tip

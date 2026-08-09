@@ -5,13 +5,13 @@
 На чистом VPS (Ubuntu/Debian):
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/HUB-DEVWORK/HUB-BOT/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/STEP-CORP/StepBot/main/scripts/install.sh)
 ```
 
 То же из клона репозитория:
 
 ```bash
-git clone https://github.com/HUB-DEVWORK/HUB-BOT.git && cd HUB-BOT
+git clone https://github.com/STEP-CORP/StepBot.git && cd StepBot
 ./scripts/install.sh
 ```
 
@@ -37,7 +37,7 @@ git clone https://github.com/HUB-DEVWORK/HUB-BOT.git && cd HUB-BOT
 
 ## Что скрипт делает сам
 
-1. При запуске через `curl` — ставит git (если нет) и клонирует репозиторий в папку `HUB-BOT`.
+1. При запуске через `curl` — ставит git (если нет) и клонирует репозиторий в папку `StepBot` (старый клон `HUB-BOT` тоже подхватит).
 2. Ставит Docker через get.docker.com, если его нет; проверяет наличие docker compose v2.
 3. Проверяет память: если RAM меньше ~1.8 GB и swap отсутствует — создаёт swap-файл 2 GB (`/swapfile`, с записью в `/etc/fstab`), чтобы сборка образов не упала по OOM.
 4. Генерирует секреты (ключ шифрования, JWT, пароль БД, пароль админа, вебхук-секрет) и пишет `.env` с правами 600.

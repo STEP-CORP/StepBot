@@ -17,7 +17,7 @@ hero:
       link: /guide/what-is
     - theme: alt
       text: GitHub
-      link: https://github.com/HUB-DEVWORK/HUB-BOT
+      link: https://github.com/STEP-CORP/StepBot
 
 features:
   - icon: 🤖

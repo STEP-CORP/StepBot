@@ -39,7 +39,7 @@
 Подключитесь к серверу по SSH и выполните две команды:
 
 ```bash
-git clone https://github.com/HUB-DEVWORK/HUB-BOT.git && cd HUB-BOT
+git clone https://github.com/STEP-CORP/StepBot.git && cd StepBot
 ./scripts/install.sh
 ```
 
@@ -80,7 +80,7 @@ git clone https://github.com/HUB-DEVWORK/HUB-BOT.git && cd HUB-BOT
 **Смена пароля администратора.** Отдельной кнопки в интерфейсе нет — пароль задаётся в файле `.env`:
 
 ```bash
-cd HUB-BOT
+cd ~/StepBot 2>/dev/null || cd ~/HUB-BOT   # папка вашей установки
 nano .env                 # поменяйте строку ADMIN__PASSWORD=...
 ./scripts/update.sh       # перезапустит стек и применит новый пароль
 ```
@@ -158,7 +158,8 @@ Claude отвечает клиентам в тикетах, а разговор�
   - Автообновление выполняет сервис `updater` (включён по умолчанию, нужен доступ к docker-сокету — как у Watchtower). Выключить: уберите `updater` из `COMPOSE_PROFILES` в `.env`; тогда кнопка просто подскажет команду ниже.
 - **Обновление вручную** — одной командой, безопасно:
   ```bash
-  cd HUB-BOT && ./scripts/update.sh
+  cd ~/StepBot 2>/dev/null || cd ~/HUB-BOT   # папка вашей установки
+  ./scripts/update.sh
   ```
   Скрипт **сначала снимает бэкап БД** в `backups/`, потом тянет обновления, пересобирает и мигрирует. Если новая версия не поднялась — печатает готовые команды отката. Данные не теряются.
 - **Бэкапы** — раздел **«Обслуживание»** (и настройки категории «Бэкапы»): включить `BACKUP_ENABLED`, задать время `BACKUP_TIME` (по умолчанию 04:00), сколько копий хранить (`BACKUP_KEEP_LAST`) и **пароль шифрования** (`BACKUP_ENCRYPTION_PASSWORD`). Кнопка **«Сделать бэкап сейчас»** снимет копию вручную. Плюс `update.sh` всегда кладёт дамп в `backups/` перед обновлением.

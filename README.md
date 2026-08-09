@@ -182,14 +182,14 @@ happ/v2raytun/hiddify/streisand), **Кабинет** (промокоды, ист
 поднимет весь стек и отдаст ссылку на кабинет. На чистом VPS (Ubuntu/Debian):
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/HUB-DEVWORK/HUB-BOT/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/STEP-CORP/StepBot/main/scripts/install.sh)
 ```
 
 <details>
 <summary>То же из клона репозитория</summary>
 
 ```bash
-git clone https://github.com/HUB-DEVWORK/HUB-BOT.git && cd HUB-BOT
+git clone https://github.com/STEP-CORP/StepBot.git && cd StepBot
 ./scripts/install.sh
 ```
 
@@ -206,7 +206,14 @@ git clone https://github.com/HUB-DEVWORK/HUB-BOT.git && cd HUB-BOT
 ## 🔄 Обновление
 
 ```bash
-cd HUB-BOT && ./scripts/update.sh
+cd ~/StepBot 2>/dev/null || cd ~/HUB-BOT   # папка вашей установки
+./scripts/update.sh
+```
+
+Не помните, куда установлен бот? Найдите папку одной командой:
+
+```bash
+find / -name update.sh -path '*/scripts/*' -not -path '*/node_modules/*' 2>/dev/null | head
 ```
 
 Скрипт **сначала снимает бэкап БД** в `backups/`, потом забирает обновления,

@@ -38,11 +38,11 @@ infra/ ─┘        ▲
 
 | ADR | Решение | Суть |
 |---|---|---|
-| [0001](https://github.com/HUB-DEVWORK/HUB-BOT/blob/main/docs/adr/0001-layered-architecture.md) | Слоистая архитектура | 4 кольца, зависимости внутрь, протоколы вместо прямых импортов. Без церемонии «один Interactor = один файл» |
-| [0002](https://github.com/HUB-DEVWORK/HUB-BOT/blob/main/docs/adr/0002-money-minor-units.md) | Деньги — целые minor-units | Все суммы — целые копейки (`BIGINT`, суффикс `_minor`). `Decimal` (ROUND_HALF_UP) — только на границе шлюза; для крипты/Stars — толеранс сверки сумм |
-| [0003](https://github.com/HUB-DEVWORK/HUB-BOT/blob/main/docs/adr/0003-one-panel-user-per-subscription.md) | Один panel-user на подписку | Каждая подписка = свой panel-user с постоянным `short_id` (не выводится из мутабельного id). Мульти-тариф не ломает HWID-лимиты; активность энфорсится partial-unique индексом |
-| [0004](https://github.com/HUB-DEVWORK/HUB-BOT/blob/main/docs/adr/0004-single-payment-webhook-route.md) | Единый платёжный ABC + один вебхук-роут | `BasePaymentGateway` + `GatewayFactory` + один роут `POST /api/v1/payments/{gateway_type}`. Вебхук: verify → enqueue → 200, фулфиллит воркер. Новый провайдер = один файл + enum + seed-row |
-| [0005](https://github.com/HUB-DEVWORK/HUB-BOT/blob/main/docs/adr/0005-panel-first-dual-write.md) | Panel-first dual-write без 2PC | Панель пишется **первой, вне DB-транзакции**, затем локальный коммит. Окно «remote orphan» закрывают retry-queue и reconcile-джоб; операции панели идемпотентны по `short_id`↔`uuid` |
+| [0001](https://github.com/STEP-CORP/StepBot/blob/main/docs/adr/0001-layered-architecture.md) | Слоистая архитектура | 4 кольца, зависимости внутрь, протоколы вместо прямых импортов. Без церемонии «один Interactor = один файл» |
+| [0002](https://github.com/STEP-CORP/StepBot/blob/main/docs/adr/0002-money-minor-units.md) | Деньги — целые minor-units | Все суммы — целые копейки (`BIGINT`, суффикс `_minor`). `Decimal` (ROUND_HALF_UP) — только на границе шлюза; для крипты/Stars — толеранс сверки сумм |
+| [0003](https://github.com/STEP-CORP/StepBot/blob/main/docs/adr/0003-one-panel-user-per-subscription.md) | Один panel-user на подписку | Каждая подписка = свой panel-user с постоянным `short_id` (не выводится из мутабельного id). Мульти-тариф не ломает HWID-лимиты; активность энфорсится partial-unique индексом |
+| [0004](https://github.com/STEP-CORP/StepBot/blob/main/docs/adr/0004-single-payment-webhook-route.md) | Единый платёжный ABC + один вебхук-роут | `BasePaymentGateway` + `GatewayFactory` + один роут `POST /api/v1/payments/{gateway_type}`. Вебхук: verify → enqueue → 200, фулфиллит воркер. Новый провайдер = один файл + enum + seed-row |
+| [0005](https://github.com/STEP-CORP/StepBot/blob/main/docs/adr/0005-panel-first-dual-write.md) | Panel-first dual-write без 2PC | Панель пишется **первой, вне DB-транзакции**, затем локальный коммит. Окно «remote orphan» закрывают retry-queue и reconcile-джоб; операции панели идемпотентны по `short_id`↔`uuid` |
 
 К ним примыкают сквозные правила: идемпотентность вебхуков (CAS + `UNIQUE(external_id, gateway_type)` + `FOR UPDATE`), замороженные снапшоты `plan_snapshot`+`pricing` на транзакции **и** подписке (изменение тарифа задним числом не меняет уже проданное), UTC-aware даты везде, Fernet-шифрование кредов шлюзов и секретов настроек.
 

@@ -1,10 +1,10 @@
 # Как участвовать
 
-Проект открыт: [github.com/HUB-DEVWORK/HUB-BOT](https://github.com/HUB-DEVWORK/HUB-BOT). Баг-репорты, идеи и PR приветствуются — правила короткие.
+Проект открыт: [github.com/STEP-CORP/StepBot](https://github.com/STEP-CORP/StepBot). Баг-репорты, идеи и PR приветствуются — правила короткие.
 
 ## Баги и идеи
 
-- 🐛 Нашли баг → [заведите issue](https://github.com/HUB-DEVWORK/HUB-BOT/issues/new/choose) по шаблону: шаги воспроизведения, окружение, логи.
+- 🐛 Нашли баг → [заведите issue](https://github.com/STEP-CORP/StepBot/issues/new/choose) по шаблону: шаги воспроизведения, окружение, логи.
 - 💡 Есть идея → issue «Идея / фича» или обсуждение в [чате сообщества](https://t.me/vpnhub_community).
 - Перед созданием проверьте, нет ли уже похожего issue.
 
@@ -30,4 +30,4 @@
 
 ## Безопасность
 
-Проект обрабатывает платежи и персональные данные подписчиков — сообщения об уязвимостях особенно ценны. **Не создавайте публичный issue**: используйте приватный отчёт «Security → Report a vulnerability» на странице репозитория. Что считается уязвимостью и как оформить отчёт — в [SECURITY.md](https://github.com/HUB-DEVWORK/HUB-BOT/blob/main/SECURITY.md).
+Проект обрабатывает платежи и персональные данные подписчиков — сообщения об уязвимостях особенно ценны. **Не создавайте публичный issue**: используйте приватный отчёт «Security → Report a vulnerability» на странице репозитория. Что считается уязвимостью и как оформить отчёт — в [SECURITY.md](https://github.com/STEP-CORP/StepBot/blob/main/SECURITY.md).

@@ -44,7 +44,7 @@ Telegram ──▶ Бот (aiogram, long polling)  ─┐                       
 ## 3. Карта репозитория
 
 ```
-HUB-BOT/
+StepBot/
 ├── src/                          ← бэкенд (Python), 4 «кольца»
 │   ├── core/                     конфиг, enums, деньги (Money), i18n, логирование
 │   ├── application/              бизнес-ядро
@@ -204,4 +204,4 @@ ssh user@host 'journalctl -u vpnshop-bot -f'         # логи бота
 
 ---
 
-История в git (`HUB-DEVWORK/HUB-BOT`, ветка `main`).
+История в git (`STEP-CORP/StepBot`, ветка `main`).

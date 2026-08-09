@@ -1,7 +1,7 @@
 import { defineConfig } from "vitepress";
 
 // Кастомный домен (docs.vpn-hub.pro) собирается с base "/";
-// GitHub Pages задаёт DOCS_BASE=/HUB-BOT/ в workflow.
+// GitHub Pages задаёт DOCS_BASE=/StepBot/ в workflow.
 const BASE = process.env.DOCS_BASE || "/";
 
 export default defineConfig({
@@ -22,7 +22,7 @@ export default defineConfig({
     sidebarMenuLabel: "Меню",
     returnToTopLabel: "Наверх",
     socialLinks: [
-      { icon: "github", link: "https://github.com/HUB-DEVWORK/HUB-BOT" },
+      { icon: "github", link: "https://github.com/STEP-CORP/StepBot" },
       { icon: "telegram", link: "https://t.me/vpnhub_community" },
     ],
     nav: [

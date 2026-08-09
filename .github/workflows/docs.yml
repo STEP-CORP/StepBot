@@ -36,4 +36,4 @@ jobs:
       - name: Build site
         run: npm run build --prefix docs-site
         env:
-          DOCS_BASE: /HUB-BOT/
+          DOCS_BASE: /StepBot/

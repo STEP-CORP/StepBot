@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # VPN-HUB BOT — safe one-command update.
 #
-#   cd HUB-BOT && ./scripts/update.sh
+#   cd <папка бота> && ./scripts/update.sh
 #
 # Order matters so a broken update never loses data:
 #   1. dump the DB into ./backups/  (rollback insurance)
