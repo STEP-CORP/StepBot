@@ -49,7 +49,6 @@ _SECRET_FIELDS = frozenset(
         "webhook_secret",
     }
 )
-_MASK = "••••••••"
 
 
 def _key(field: str) -> str:
