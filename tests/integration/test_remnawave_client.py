@@ -88,6 +88,31 @@ async def test_get_version_unknown_assumes_modern_no_legacy_caps() -> None:
 
 
 @respx.mock
+async def test_profile_loader_switches_panel_without_restarting_client() -> None:
+    old = RemnawaveSettings(base_url=BASE, auth_type=PanelAuthType.API_KEY, token="old-token")
+    new_base = "https://new-panel.example.com"
+    new = RemnawaveSettings(base_url=new_base, auth_type=PanelAuthType.API_KEY, token="new-token")
+    respx.get(f"{new_base}/api/system/metadata").mock(
+        return_value=httpx.Response(200, json={"response": {"version": "3.0.1"}})
+    )
+    current = [build_profile(new)]
+
+    async def load_profile():
+        return current[0]
+
+    client = RemnawaveHttpClient.from_profile(build_profile(old), profile_loader=load_profile)
+    try:
+        version = await client.get_version()
+    finally:
+        await client.aclose()
+
+    assert version.tuple == (3, 0, 1)
+    request = respx.calls.last.request
+    assert request.url.host == "new-panel.example.com"
+    assert request.headers["X-Api-Key"] == "new-token"
+
+
+@respx.mock
 async def test_create_user_sends_both_auth_headers_and_maps_dto() -> None:
     panel_uuid = uuid.uuid4()
     route = respx.post(f"{BASE}/api/users").mock(

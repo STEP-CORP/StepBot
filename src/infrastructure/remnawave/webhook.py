@@ -26,8 +26,12 @@ class WebhookVerifier:
     """HMAC-SHA256 verifier for panel webhooks. Header name is panel-configurable."""
 
     def __init__(self, secret: str, *, signature_header: str = "x-remnawave-signature") -> None:
-        self._secret = secret.encode()
+        self.set_secret(secret)
         self._header = signature_header.lower()
+
+    def set_secret(self, secret: str) -> None:
+        """Replace the shared secret after an owner changes the panel settings."""
+        self._secret = secret.encode()
 
     def _expected(self, body: bytes) -> str:
         return hmac.new(self._secret, body, hashlib.sha256).hexdigest()

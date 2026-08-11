@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 
 from src.application.dto.pricing import PurchaseRequest
 from src.application.services.pricing import PricingService
@@ -11,6 +12,7 @@ from src.application.services.remnawave import RemnawaveService
 from src.application.services.subscription import SubscriptionService
 from src.bot.gate import parse_channels
 from src.core.enums import Currency, PurchaseType
+from src.infrastructure.database.models.server_squad import ServerSquad
 from src.infrastructure.database.uow import UnitOfWork
 from tests.factories import make_plan, make_user
 from tests.fakes import FakeRemnawaveClient, RecordingEventBus
@@ -111,6 +113,35 @@ async def test_trial_carryover_adds_bonus_days_on_change(uow: UnitOfWork) -> Non
         )
         left2 = (sub.expire_at - dt.datetime.now(dt.UTC)).days
         assert 29 <= left2 <= 30
+
+
+async def test_stale_plan_squad_falls_back_to_synced_available_squad(uow: UnitOfWork) -> None:
+    """A deleted panel squad in a frozen plan must not turn provisioning into a 500."""
+    fake = FakeRemnawaveClient()
+    subs = SubscriptionService(RemnawaveService(fake))
+    live_uuid = uuid.uuid4()
+    async with uow:
+        user = await make_user(uow)
+        plan, _ = await make_plan(uow, code="trial-stale")
+        plan.internal_squads = [str(uuid.uuid4())]
+        uow.session.add(ServerSquad(squad_uuid=live_uuid, display_name="Live squad"))
+        await uow.commit()
+
+        sub = await subs.grant(
+            uow,
+            user=user,
+            plan=plan,
+            req=PurchaseRequest(
+                user_id=user.id,
+                plan_id=plan.id,
+                duration_days=3,
+                currency=Currency.RUB,
+            ),
+            is_trial=True,
+        )
+
+        assert sub.internal_squads == [str(live_uuid)]
+        assert next(iter(fake.users.values())).internal_squads == (str(live_uuid),)
 
 
 async def test_purchase_service_reads_carryover_flag(uow: UnitOfWork) -> None:

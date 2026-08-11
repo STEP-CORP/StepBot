@@ -35,6 +35,7 @@ from src.application.services.promo import PromoService
 from src.application.services.purchase import PurchaseService
 from src.application.services.referral import ReferralService
 from src.application.services.remnawave import RemnawaveService
+from src.application.services.remnawave_config import RemnawaveConfigService
 from src.application.services.subscription import SubscriptionService
 from src.application.services.traffic import TrafficService
 from src.core.config import get_settings
@@ -91,6 +92,7 @@ class ApiTestContainer:
         self.secret_box = SecretBox(settings.app.crypt_key)
         self.event_bus = InProcessEventBus()
         self.remnawave = RemnawaveService(self.remnawave_client)
+        self.remnawave_config = RemnawaveConfigService(self.secret_box, settings.remnawave)
         self.pricing = PricingService()
         self.subscriptions = SubscriptionService(self.remnawave)
         self.purchase = PurchaseService(self.pricing, self.subscriptions, self.event_bus)
@@ -111,6 +113,9 @@ class ApiTestContainer:
         return UnitOfWork(self._session_factory)
 
     async def aclose(self) -> None: ...
+
+    async def refresh_remnawave_runtime(self) -> None:
+        self.remnawave_config.invalidate()
 
 
 @pytest_asyncio.fixture
@@ -838,6 +843,47 @@ async def test_blacklist_crud(
 
 
 # --- servers sync -------------------------------------------------------------------------
+
+
+async def test_owner_can_manage_remnawave_connection_without_exposing_secrets(
+    client: tuple[httpx.AsyncClient, ApiTestContainer],
+) -> None:
+    http, container = client
+    auth = await _login(http)
+
+    res = await http.get("/api/admin/servers/connection", headers=auth)
+    assert res.status_code == 200
+    assert res.json()["token_set"] is False
+
+    res = await http.patch(
+        "/api/admin/servers/connection",
+        headers=auth,
+        json={
+            "base_url": "https://panel.example.com/",
+            "auth_type": "api_key",
+            "token": "panel-secret",
+            "webhook_secret": "webhook-secret",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()["connection"]
+    assert body["base_url"] == "https://panel.example.com"
+    assert body["token_set"] is True
+    assert "panel-secret" not in res.text
+
+    async with container.uow() as uow:
+        token_row = await uow.bot_config.find_one(key="REMNAWAVE__TOKEN")
+        assert token_row is not None
+        assert token_row.value != "panel-secret"
+
+    res = await http.post("/api/admin/servers/connection/check", headers=auth)
+    assert res.status_code == 200
+    assert res.json()["version"] == "2.8.0"
+
+    res = await http.post("/api/admin/servers/connection/reset", headers=auth)
+    assert res.status_code == 200
+    res = await http.get("/api/admin/servers/connection", headers=auth)
+    assert res.json()["token_set"] is False
 
 
 async def test_servers_sync_mirrors_nodes(

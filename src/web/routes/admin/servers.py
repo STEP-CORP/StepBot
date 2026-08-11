@@ -5,12 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from src.application.services.remnawave_config import RemnawaveConfigError
+from src.core.config.remnawave import PanelAuthType
+from src.core.exceptions import RemnawaveError
 from src.infrastructure.di import AppContainer
 from src.web.deps import get_container
 from src.web.routes.admin._common import OkOut, audit, iso
-from src.web.routes.admin.deps import AdminIdentity, require_admin
+from src.web.routes.admin.deps import AdminIdentity, require_admin, require_owner
 
 router = APIRouter(prefix="/servers")
 
@@ -38,8 +41,9 @@ async def list_nodes(container: AppContainer = Depends(get_container)) -> dict[s
     async with container.uow() as uow:
         nodes = await uow.server_nodes.list()
         squads = await uow.server_squads.list()
+        panel_settings = await container.remnawave_config.effective(uow)
     return {
-        "panel_url": container.settings.remnawave.base_url,
+        "panel_url": panel_settings.base_url,
         "items": [_row(n) for n in nodes],
         "squads": [
             {
@@ -51,6 +55,73 @@ async def list_nodes(container: AppContainer = Depends(get_container)) -> dict[s
             for sq in squads
         ],
     }
+
+
+class ConnectionPatch(BaseModel):
+    base_url: str | None = Field(default=None, max_length=512)
+    auth_type: PanelAuthType | None = None
+    token: str | None = Field(default=None, max_length=2048)
+    basic_user: str | None = Field(default=None, max_length=128)
+    basic_password: str | None = Field(default=None, max_length=512)
+    caddy_api_key: str | None = Field(default=None, max_length=2048)
+    cf_access_client_id: str | None = Field(default=None, max_length=512)
+    cf_access_client_secret: str | None = Field(default=None, max_length=2048)
+    secret_key_cookie: str | None = Field(default=None, max_length=2048)
+    webhook_secret: str | None = Field(default=None, max_length=2048)
+    force_local: str | None = Field(default=None, max_length=8)
+
+
+@router.get("/connection")
+async def get_connection(container: AppContainer = Depends(get_container)) -> dict[str, Any]:
+    async with container.uow() as uow:
+        return await container.remnawave_config.listing(uow)
+
+
+@router.patch("/connection")
+async def patch_connection(
+    body: ConnectionPatch,
+    identity: AdminIdentity = Depends(require_owner),
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(400, "no connection changes")
+    async with container.uow() as uow:
+        try:
+            written = await container.remnawave_config.update(uow, changes)
+        except RemnawaveConfigError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        await audit(uow, identity, "remnawave.connection.patch", None, keys=written)
+        await uow.commit()
+    await container.refresh_remnawave_runtime()
+    async with container.uow() as uow:
+        current = await container.remnawave_config.listing(uow)
+    return {"ok": True, "applied": written, "connection": current}
+
+
+@router.post("/connection/reset")
+async def reset_connection(
+    identity: AdminIdentity = Depends(require_owner),
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    async with container.uow() as uow:
+        await container.remnawave_config.reset(uow)
+        await audit(uow, identity, "remnawave.connection.reset", None)
+        await uow.commit()
+    await container.refresh_remnawave_runtime()
+    return {"ok": True}
+
+
+@router.post("/connection/check")
+async def check_connection(
+    identity: AdminIdentity = Depends(require_owner),
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    try:
+        version = await container.remnawave_client.get_version()
+    except RemnawaveError as exc:
+        raise HTTPException(502, f"panel connection failed: {exc}") from exc
+    return {"ok": True, "version": version.raw}
 
 
 @router.post("/sync")

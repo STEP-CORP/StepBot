@@ -16,6 +16,7 @@ import asyncio
 import datetime as dt
 import random
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -206,8 +207,17 @@ def _spec_payload(spec: ProvisionSpec) -> dict[str, Any]:
 class RemnawaveHttpClient:
     """Async httpx client. Construct via :meth:`from_profile` (or DI)."""
 
-    def __init__(self, http: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        http: httpx.AsyncClient,
+        *,
+        profile: ConnectionProfile,
+        profile_loader: Callable[[], Awaitable[ConnectionProfile]] | None = None,
+    ) -> None:
         self._http = http
+        self._profile = profile
+        self._profile_loader = profile_loader
+        self._profile_lock = asyncio.Lock()
         # API generation: 2 or 3, probed lazily from the panel version. None = not yet known.
         self._mode: int | None = None
         self._mode_lock = asyncio.Lock()
@@ -216,7 +226,11 @@ class RemnawaveHttpClient:
 
     @classmethod
     def from_profile(
-        cls, profile: ConnectionProfile, *, timeout: float = 15.0
+        cls,
+        profile: ConnectionProfile,
+        *,
+        timeout: float = 15.0,
+        profile_loader: Callable[[], Awaitable[ConnectionProfile]] | None = None,
     ) -> RemnawaveHttpClient:
         client = httpx.AsyncClient(
             base_url=profile.base_url,
@@ -225,13 +239,44 @@ class RemnawaveHttpClient:
             verify=profile.verify,
             timeout=timeout,
         )
-        return cls(client)
+        return cls(client, profile=profile, profile_loader=profile_loader)
 
     async def aclose(self) -> None:
         await self._http.aclose()
 
+    async def reload_profile(self, profile: ConnectionProfile) -> None:
+        """Apply a new connection profile without restarting the process."""
+        async with self._profile_lock:
+            if profile == self._profile:
+                return
+            replacement = httpx.AsyncClient(
+                base_url=profile.base_url,
+                headers=profile.headers,
+                cookies=profile.cookies,
+                verify=profile.verify,
+                timeout=self._http.timeout,
+            )
+            previous = self._http
+            self._http = replacement
+            self._profile = profile
+            self._mode = None
+            self._id_cache.clear()
+            await previous.aclose()
+
+    async def _ensure_current_profile(self) -> None:
+        if self._profile_loader is None:
+            return
+        try:
+            profile = await self._profile_loader()
+            await self.reload_profile(profile)
+        except Exception as exc:
+            # Keep using the last known-good client when the config database is temporarily
+            # unavailable. The request itself will still report a real panel/transport error.
+            log.warning("remnawave profile refresh failed", error=str(exc))
+
     # --- low-level request with retry -------------------------------------
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        await self._ensure_current_profile()
         last_exc: Exception | None = None
         for attempt in range(1, PANEL_RETRY_ATTEMPTS + 1):
             try:

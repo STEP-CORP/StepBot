@@ -50,3 +50,10 @@ async def require_admin(
     elif not user.role.is_staff:
         raise _unauthorized("admin access revoked")
     return AdminIdentity(user_id=user.id, username=user.username or f"id{user.id}", role=user.role)
+
+
+async def require_owner(identity: AdminIdentity = Depends(require_admin)) -> AdminIdentity:
+    """Panel credentials are more sensitive than ordinary bot settings."""
+    if identity.role is not Role.OWNER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="owner access required")
+    return identity

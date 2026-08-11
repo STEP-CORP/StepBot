@@ -19,6 +19,7 @@ from src.application.services.promo import PromoService
 from src.application.services.purchase import PurchaseService
 from src.application.services.referral import ReferralService
 from src.application.services.remnawave import RemnawaveService
+from src.application.services.remnawave_config import RemnawaveConfigService
 from src.application.services.resync import RemnawaveResyncService
 from src.application.services.subscription import SubscriptionService
 from src.application.services.traffic import TrafficService
@@ -32,7 +33,7 @@ from src.infrastructure.payments.crypto import SecretBox
 from src.infrastructure.payments.factory import GatewayFactory
 from src.infrastructure.redis.client import create_redis
 from src.infrastructure.remnawave.client import RemnawaveHttpClient
-from src.infrastructure.remnawave.connection import build_profile
+from src.infrastructure.remnawave.connection import ConnectionProfile, build_profile
 from src.infrastructure.remnawave.webhook import WebhookVerifier
 from src.infrastructure.services.ai_support import AiSupportService
 from src.infrastructure.services.mailer import Mailer
@@ -52,12 +53,15 @@ class AppContainer:
         self.session_factory: async_sessionmaker[AsyncSession] = create_session_factory(self.engine)
         self.redis: Redis = create_redis(settings)
 
-        self.remnawave_client = RemnawaveHttpClient.from_profile(build_profile(settings.remnawave))
-        self.panel_webhook = WebhookVerifier(settings.remnawave.webhook_secret)
-        self.gateway_factory = GatewayFactory()
         self.secret_box: SecretBox | None = (
             SecretBox(settings.app.crypt_key) if settings.app.crypt_key else None
         )
+        self.remnawave_config = RemnawaveConfigService(self.secret_box, settings.remnawave)
+        self.remnawave_client = RemnawaveHttpClient.from_profile(
+            build_profile(settings.remnawave), profile_loader=self._load_remnawave_profile
+        )
+        self.panel_webhook = WebhookVerifier(settings.remnawave.webhook_secret)
+        self.gateway_factory = GatewayFactory()
         self.event_bus = InProcessEventBus()
         self.translator: Translator = load_translations()
         self.telemetry = TelemetryReporter(
@@ -99,6 +103,18 @@ class AppContainer:
         wire_report_events(self)
         wire_postback_events(self)  # S2S tracking pixels on registration/trial/purchase
         wire_user_notifications(self)  # user-facing lifecycle DMs (referral reward)
+
+    async def _load_remnawave_profile(self) -> ConnectionProfile:
+        async with self.uow() as uow:
+            settings = await self.remnawave_config.effective(uow)
+            return build_profile(settings)
+
+    async def refresh_remnawave_runtime(self) -> None:
+        """Apply the database-managed panel settings to this process immediately."""
+        async with self.uow() as uow:
+            settings = await self.remnawave_config.effective(uow)
+        await self.remnawave_client.reload_profile(build_profile(settings))
+        self.panel_webhook.set_secret(settings.webhook_secret)
 
     @classmethod
     def from_env(cls) -> AppContainer:

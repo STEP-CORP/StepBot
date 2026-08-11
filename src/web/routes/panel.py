@@ -36,6 +36,11 @@ async def panel_webhook(
     request: Request, container: AppContainer = Depends(get_container)
 ) -> dict[str, Any]:
     body = await request.body()
+    # The owner can rotate the webhook secret from the cabinet. Refresh the verifier before
+    # checking the signature so a bot/web process does not need a restart to accept the new key.
+    async with container.uow() as uow:
+        panel_settings = await container.remnawave_config.effective(uow)
+    container.panel_webhook.set_secret(panel_settings.webhook_secret)
     try:
         container.panel_webhook.verify(body, dict(request.headers))
     except WebhookVerificationError as exc:

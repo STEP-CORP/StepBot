@@ -40,7 +40,9 @@ class SubscriptionService:
     def __init__(self, remnawave: RemnawaveService) -> None:
         self._remnawave = remnawave
 
-    async def _fallback_squads(self, uow: UnitOfWork, *, is_trial: bool) -> tuple[str, ...]:
+    async def _fallback_squads(
+        self, uow: UnitOfWork, *, is_trial: bool, rows: list[Any] | None = None
+    ) -> tuple[str, ...]:
         """Squads to provision with when neither the request nor the plan names one.
 
         Without this an unconfigured plan/trial (e.g. the lazily-created ``Trial`` plan, whose
@@ -49,10 +51,32 @@ class SubscriptionService:
         Sells every available synced squad; trials narrow to the trial-eligible ones when the
         owner has flagged any (this is the first place ``is_trial_eligible`` is actually read).
         """
-        rows = [s for s in await uow.server_squads.list() if s.is_available]
+        rows = rows if rows is not None else list(await uow.server_squads.list())
+        rows = [s for s in rows if s.is_available]
         if is_trial:
             rows = [s for s in rows if s.is_trial_eligible] or rows
         return tuple(str(s.squad_uuid) for s in rows)
+
+    async def _resolve_squads(
+        self,
+        uow: UnitOfWork,
+        requested: tuple[str, ...],
+        *,
+        is_trial: bool,
+    ) -> tuple[str, ...]:
+        """Drop stale plan references before they reach Remnawave.
+
+        The local mirror is populated by the panel sync. If it has rows, an explicit plan is
+        allowed to use only currently available squads; a deleted/renamed panel squad is treated
+        like an unconfigured plan and falls back to the available mirror. An empty mirror is kept
+        permissive for first-boot/demo installs where the panel has not been synced yet.
+        """
+        rows = list(await uow.server_squads.list())
+        if not rows:
+            return requested
+        available = {str(row.squad_uuid) for row in rows if row.is_available}
+        selected = tuple(squad for squad in requested if squad in available)
+        return selected or await self._fallback_squads(uow, is_trial=is_trial, rows=rows)
 
     async def grant(
         self,
@@ -80,9 +104,10 @@ class SubscriptionService:
         )
         device_limit = req.device_limit if req.device_limit is not None else plan.device_limit
 
-        squads = req.internal_squads or tuple(plan.internal_squads)
-        if not squads:  # unconfigured plan/trial → don't ship a squad-less (dead) panel user
-            squads = await self._fallback_squads(uow, is_trial=is_trial)
+        requested_squads = req.internal_squads or tuple(plan.internal_squads)
+        # A panel squad can disappear while its UUID remains frozen in a plan snapshot. Resolve
+        # against the synced mirror so this becomes a usable fallback instead of a Remnawave 500.
+        squads = await self._resolve_squads(uow, requested_squads, is_trial=is_trial)
         spec = self._remnawave.build_spec(
             short_id=short_id,
             telegram_id=user.telegram_id,
