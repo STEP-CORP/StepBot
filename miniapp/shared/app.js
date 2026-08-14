@@ -111,6 +111,12 @@
       // the traffic panel. Server also nulls subscription_url when hideLink, belt-and-braces.
       hideLink: !!appCfg.hide_subscription_link,
       showTraffic: appCfg.show_traffic_usage !== false,
+      balanceEnabled: appCfg.balance_enabled !== false,
+      // Top-up bounds (min_deposit_minor from MIN_DEPOSIT_AMOUNT, max_deposit_minor a fixed
+      // ceiling) — the actions.topup() prompt validates against these before it ever calls
+      // POST /topup; the server re-validates both regardless.
+      minDepositMinor: appCfg.min_deposit_minor || 0,
+      maxDepositMinor: appCfg.max_deposit_minor || 100000000,
       user: {
         firstName: (me.user && me.user.first_name) || "",
         username: (me.user && me.user.username) || "",
@@ -160,6 +166,11 @@
   }
 
   // ---- user actions (thin wrappers with haptics) ---------------------------
+  // Preset RUB top-up amounts offered inline by the lightweight themes' balance card —
+  // mirrors TOPUP_PRESETS_RUB in miniapp/app/app.js so both surfaces nudge the same round
+  // numbers. Templates filter these against the owner's min/max via topupPresets() below.
+  const TOPUP_PRESETS_RUB = [100, 250, 500, 1000];
+
   const actions = {
     async copyLink(url) {
       const ok = await tg.copy(url);
@@ -190,6 +201,84 @@
     async resetDevices() {
       tg.haptic("warning");
       return api.resetDevices();
+    },
+    /** Stars-only top-up (these lightweight themes have no gateway picker yet — see the
+     * cabinet.py review fixes' report for why). Returns:
+     *   {ok:true}                     — invoice paid (Stars) or hosted page opened (gateway)
+     *   {ok:false, pending:true}      — invoice opened but not confirmed yet
+     *   {ok:false, unsupported:true}  — Telegram client too old for WebApp.openInvoice
+     *   {ok:false}                    — request failed (see .error) */
+    async topup(amountMinor) {
+      tg.haptic("light");
+      try {
+        const r = await api.topup(amountMinor, "stars");
+        if (r && r.redirect_url) {
+          tg.openLink(r.redirect_url);
+          return { ok: true, pending: true };
+        }
+        if (r && r.invoice_link) {
+          const status = await tg.openInvoice(r.invoice_link);
+          if (status === "unsupported") {
+            tg.haptic("error");
+            return { ok: false, unsupported: true };
+          }
+          tg.haptic(status === "paid" ? "success" : "error");
+          return { ok: status === "paid", pending: status !== "paid" && status !== "failed" };
+        }
+        // The real /topup endpoint never returns a bare {ok:true} (no invoice_link/redirect_url)
+        // — only the mock/preview response above does, on purpose, to demo a "successful" tap.
+        if (r && r.ok) {
+          tg.haptic("success");
+          return { ok: true };
+        }
+        return { ok: false };
+      } catch (err) {
+        tg.haptic("error");
+        return { ok: false, error: err && err.message };
+      }
+    },
+    /** Preset amounts (minor units), clamped to `model.min/maxDepositMinor` — empty if none
+     * of TOPUP_PRESETS_RUB fit inside the owner's bounds (the caller still offers the free
+     * `parseTopupAmount` field, so an empty result is not a dead end). */
+    topupPresets(model) {
+      const minDep = model.minDepositMinor || 0;
+      const maxDep = model.maxDepositMinor || 100000000;
+      return TOPUP_PRESETS_RUB.map((r) => r * 100).filter((m) => m >= minDep && m <= maxDep);
+    },
+    /** Validates a raw RUB string (typed into a custom-amount field) against
+     * `model.minDepositMinor`/`maxDepositMinor` client-side — the server re-validates both
+     * regardless. Returns `{minor}` on success or `{error}` with an already-localized
+     * message ready to show. */
+    parseTopupAmount(model, raw) {
+      const rub = Number(String(raw).trim().replace(",", "."));
+      if (!String(raw).trim() || !isFinite(rub) || rub <= 0) {
+        return { error: Cabinet.t("topupCustomBad") };
+      }
+      const minor = Math.round(rub * 100);
+      const currency = model.currency || "RUB";
+      const minDep = model.minDepositMinor || 0;
+      const maxDep = model.maxDepositMinor || 100000000;
+      if (minor < minDep) {
+        return { error: Cabinet.t("topupBelowMin", { amount: fmt.money(minDep, currency) }) };
+      }
+      if (minor > maxDep) {
+        return { error: Cabinet.t("topupAboveMax", { amount: fmt.money(maxDep, currency) }) };
+      }
+      return { minor };
+    },
+    /** Turns a topup() result into a toast-ready `{ok, message}`. `pending` MUST be checked
+     * before `ok`: a hosted-gateway redirect comes back as `{ok:true, pending:true}` (opened,
+     * not confirmed yet), and checking `.ok` first used to report "Balance topped up" for an
+     * unconfirmed payment — unreachable today because this surface hardcodes the Stars
+     * method, but the next gateway wired into these lightweight themes would hit it exactly
+     * like the mock/preview response already does in `topup()` above. Mirrors the check order
+     * already fixed in miniapp/app/app.js's submitTopup (redirect/invoice branches resolved
+     * before the bare-`ok` fallback). */
+    topupResultMessage(r) {
+      if (r.unsupported) return { ok: false, message: Cabinet.t("topupUnsupported") };
+      if (r.pending) return { ok: false, message: Cabinet.t("topupPending") };
+      if (r.ok) return { ok: true, message: Cabinet.t("topupOk") };
+      return { ok: false, message: r.error || Cabinet.t("topupFailed") };
     },
   };
 

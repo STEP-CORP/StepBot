@@ -1,7 +1,7 @@
 /* Aurora presentation. Binds the shared view-model into the glassmorphism layout. */
 (function () {
   "use strict";
-  const { t } = Cabinet;
+  const { t, fmt } = Cabinet;
   const root = document.getElementById("app");
 
   // --- tiny DOM helper ------------------------------------------------------
@@ -119,14 +119,69 @@
     ]);
   }
 
+  // Inline preset chips + a free-typed custom amount, both feeding Cabinet.actions.topup().
+  // A real in-page field, not window.prompt() — Telegram's in-app WebView doesn't implement
+  // it (many clients resolve it to null immediately), so the old "＋ Пополнить" button used
+  // to do nothing at all.
+  function topupComposer(m) {
+    const presets = Cabinet.actions.topupPresets(m);
+    const sel = { i: 0 };
+    const input = el("input", { class: "inp", type: "text", inputmode: "decimal", placeholder: t("topupPrompt") });
+    const note = el("div", { class: "note" });
+    const submitBtn = el("button", { class: "btn sm", text: t("topUp") });
+    const chipEls = presets.map((minor, i) =>
+      el(
+        "div",
+        {
+          class: "dur",
+          onclick: () => {
+            sel.i = i;
+            input.value = "";
+            syncChips();
+          },
+        },
+        [el("div", { class: "dur-p", text: fmt.money(minor, m.currency) })]
+      )
+    );
+    function syncChips() {
+      chipEls.forEach((c, i) => c.classList.toggle("on", i === sel.i && !input.value.trim()));
+    }
+    syncChips();
+    input.addEventListener("input", syncChips);
+    submitBtn.addEventListener("click", async () => {
+      const raw = input.value.trim() || (presets.length ? String(presets[sel.i] / 100) : "");
+      const parsed = Cabinet.actions.parseTopupAmount(m, raw);
+      if (parsed.error) {
+        note.className = "note bad";
+        note.textContent = parsed.error;
+        return;
+      }
+      submitBtn.disabled = true;
+      const r = await Cabinet.actions.topup(parsed.minor);
+      submitBtn.disabled = false;
+      const res = Cabinet.actions.topupResultMessage(r);
+      note.className = "note " + (res.ok ? "ok" : "bad");
+      note.textContent = res.message;
+      if (res.ok) render(await Cabinet.load());
+    });
+    return el("div", { style: "margin-top:12px" }, [
+      presets.length ? el("div", { class: "durs", style: "margin:0 0 10px" }, chipEls) : null,
+      el("div", { class: "promo-row" }, [input, submitBtn]),
+      note,
+    ]);
+  }
+
   function balance(m) {
-    return el("div", { class: "card bal reveal" }, [
+    const header = el("div", { class: "bal" }, [
       el("div", {}, [
         el("div", { class: "card-title", style: "margin:0 0 4px", text: t("balance") }),
         el("div", { class: "bal-amount", text: m.user.balanceLabel }),
       ]),
-      el("button", { class: "btn sm", onclick: () => toast(t("topUp") + " →"), text: "＋ " + t("topUp") }),
     ]);
+    // #2: the owner turned the wallet off (BALANCE_ENABLED=false) — no top-up field, not just
+    // a hidden button, since /topup would 400 on every submit anyway.
+    const kids = m.balanceEnabled ? [header, topupComposer(m)] : [header];
+    return el("div", { class: "card reveal" }, kids);
   }
 
   function planCard(m, p) {

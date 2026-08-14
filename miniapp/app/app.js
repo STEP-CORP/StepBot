@@ -31,6 +31,11 @@
     send: "Отпр.", supportPh: "Опишите вопрос…", supportHint: "Напишите нам — ответим здесь.",
     supportTyping: "печатает…", supportEscalated: "Подключаем оператора",
     balance: "Баланс", upTo: "до", noSub: "Сначала оформи подписку",
+    topupBtn: "Пополнить", topupTitle: "Пополнение баланса", topupAmount: "Сумма",
+    topupSubmit: "Пополнить", topupDone: "Баланс пополнен",
+    topupCustom: "Своя сумма", topupCustomBad: "Введите сумму числом",
+    topupBelowMin: (m) => `Минимум — ${m}`, topupAboveMax: (m) => `Максимум — ${m}`,
+    topupInvoiceUnsupported: "Обнови Telegram или выбери другой способ оплаты — счёт не открылся",
     payBalance: "С баланса", payStars: "Stars", trialBtn: "Попробовать бесплатно",
     bought: "Готово! Подписка активна", error: "Ошибка, попробуй ещё раз",
     version: "v2 · VLESS", loading: "Загрузка…",
@@ -87,6 +92,11 @@
     send: "Send", supportPh: "Describe your question…", supportHint: "Message us — we'll reply here.",
     supportTyping: "typing…", supportEscalated: "Connecting an operator",
     balance: "Balance", upTo: "up to", noSub: "Get a subscription first",
+    topupBtn: "Top up", topupTitle: "Top up balance", topupAmount: "Amount",
+    topupSubmit: "Top up", topupDone: "Balance topped up",
+    topupCustom: "Custom amount", topupCustomBad: "Enter a valid amount",
+    topupBelowMin: (m) => `Minimum — ${m}`, topupAboveMax: (m) => `Maximum — ${m}`,
+    topupInvoiceUnsupported: "Update Telegram or choose another payment method — the invoice didn't open",
     payBalance: "Balance", payStars: "Stars", trialBtn: "Try for free",
     bought: "Done! Subscription is active", error: "Error, try again",
     loading: "Loading…",
@@ -259,7 +269,15 @@
   }
 
   // ---------- state ----------
-  const state = { tab: "home", me: null, plans: null, constructor: null, referral: null, payments: null, connection: null, tariffSel: 0, planSel: 0, cPerSel: 0, cPackSel: 0, paySel: "stars", devices: undefined };
+  const state = { tab: "home", me: null, plans: null, constructor: null, referral: null, payments: null, connection: null, tariffSel: 0, planSel: 0, cPerSel: 0, cPackSel: 0, paySel: "stars", devices: undefined, topupOpen: false, topupAmountSel: 0, topupPaySel: "stars", topupCustom: "" };
+  // Preset top-up amounts (RUB) offered in the mini-app — mirrors the bot's own topup_amount
+  // presets (src/bot/handlers/purchase.py); the server re-validates against MIN_DEPOSIT_AMOUNT
+  // regardless of which preset the client claims to have tapped.
+  const TOPUP_PRESETS_RUB = [100, 250, 500, 1000];
+  // Fallback ceiling if /me predates `max_deposit_minor` (older cached response) — mirrors
+  // MAX_DEPOSIT_AMOUNT_MINOR in src/core/constants.py. The server always re-validates (#4);
+  // this only lets the custom-amount field warn before a round trip.
+  const TOPUP_MAX_FALLBACK_MINOR = 100_000_000;
   // admin overrides: {scale, sections:[order], hidden:[keys], buttons:{key:{text,color}},
   // blocks:[{screen,title,text,icon,url,button_label,color}], buttons_extra:[{screen,label,url,color,style}]}
   let UI = {};
@@ -332,7 +350,10 @@
   }
 
   // ---------- screens ----------
-  function payChips(starsCount) {
+  // opts: { excludeBalance, selected, onSelect } — the balance top-up card reuses this same
+  // chip pattern but must never offer "pay with balance" and tracks its own selection state.
+  function payChips(starsCount, opts) {
+    opts = opts || {};
     const me = state.me;
     const app = (me && me.app) || {};
     const gwById = {};
@@ -344,21 +365,109 @@
       : (app.balance_enabled === false ? [] : ["balance"]).concat(["stars"], (app.payment_methods || []).map((pm) => pm.id));
     const balanceLabel = app.pay_balance_label || T.payBalance;
     const starsLabel = app.pay_stars_label || T.payStars;
+    const selected = opts.selected !== undefined ? opts.selected : state.paySel;
+    const select = opts.onSelect || ((id) => { state.paySel = id; render(); });
     const chip = (id, text) => el("button", {
-      class: `chip${state.paySel === id ? " on" : ""}`,
-      onclick: () => { state.paySel = id; render(); },
+      class: `chip${selected === id ? " on" : ""}`,
+      onclick: () => select(id),
       text,
     });
     const chips = order.map((id) => {
       if (id === "balance") {
-        if (app.balance_enabled === false) return null;
+        if (opts.excludeBalance || app.balance_enabled === false) return null;
         return chip("balance", `${balanceLabel} · ${me ? money(me.user.balance_minor) : ""}`);
       }
-      if (id === "stars") return chip("stars", `⭐ ${starsLabel} · ${starsCount}`);
+      if (id === "stars") return chip("stars", starsCount ? `⭐ ${starsLabel} · ${starsCount}` : `⭐ ${starsLabel}`);
       const gw = gwById[id];
       return gw ? chip(gw.id, `💳 ${gw.label}`) : null;
     }).filter(Boolean);
     return el("div", { class: "chips" }, chips);
+  }
+
+  // Parses a free-typed RUB amount ("3000" / "3 000,50") into minor units, or null if it
+  // isn't a positive number.
+  function parseCustomAmountMinor(raw) {
+    const s = String(raw || "").trim().replace(/\s/g, "").replace(",", ".");
+    if (!s) return null;
+    const rub = Number(s);
+    if (!isFinite(rub) || rub <= 0) return null;
+    return Math.round(rub * 100);
+  }
+
+  // Balance top-up card (Account tab): presets + a free-typed custom amount + payChips
+  // (Stars/gateways only, no "pay with balance" — you can't top up the wallet from itself).
+  //
+  // A hard-coded preset alone sent a user who needs, say, 3000 ₽ into the provider's own
+  // editable-amount form (e.g. YooMoney quickpay), where they'd type their own number and
+  // only the invoice amount gets credited — the gap silently vanishes. The custom field lets
+  // them pick their real amount here, validated against min/max before it ever round-trips.
+  function topupCard() {
+    const me = state.me;
+    const app = (me && me.app) || {};
+    const minDep = app.min_deposit_minor || 0;
+    const maxDep = app.max_deposit_minor || TOPUP_MAX_FALLBACK_MINOR;
+    const presets = TOPUP_PRESETS_RUB.map((r) => r * 100).filter((m) => m >= minDep && m <= maxDep);
+    const amounts = presets.length ? presets : [Math.min(Math.max(minDep, 1), maxDep) || 10000];
+    const amountIdx = state.topupAmountSel < amounts.length ? state.topupAmountSel : 0;
+
+    const customInp = el("input", {
+      class: "inp",
+      type: "text",
+      inputmode: "decimal",
+      style: "margin-top:8px",
+      placeholder: `${T.topupCustom} (${money(minDep)}–${money(maxDep)})`,
+    });
+    customInp.value = state.topupCustom || "";
+    const chipEls = amounts.map((m, i) =>
+      el("button", {
+        class: `chip${amountIdx === i && !customInp.value.trim() ? " on" : ""}`,
+        onclick: () => { state.topupAmountSel = i; state.topupCustom = ""; haptic(); render(); },
+        text: money(m),
+      }),
+    );
+    const hint = el("div", { class: "sub", style: "font-size:11.5px;margin-top:4px;color:var(--warn)" });
+    const submitBtn = el("button", { class: "btn primary", style: "margin-top:12px", text: T.topupSubmit });
+
+    function currentAmount() {
+      const raw = customInp.value.trim();
+      if (!raw) return amounts[amountIdx];
+      return parseCustomAmountMinor(raw);
+    }
+    function refreshSubmit() {
+      const raw = customInp.value.trim();
+      const amt = currentAmount();
+      let bad = "";
+      if (raw && amt == null) bad = T.topupCustomBad;
+      else if (amt != null && amt < minDep) bad = T.topupBelowMin(money(minDep));
+      else if (amt != null && amt > maxDep) bad = T.topupAboveMax(money(maxDep));
+      hint.textContent = bad;
+      submitBtn.disabled = !amt || !!bad;
+      submitBtn.textContent = amt ? `${T.topupSubmit} · ${money(amt)}` : T.topupSubmit;
+    }
+    customInp.addEventListener("input", () => {
+      state.topupCustom = customInp.value;
+      chipEls.forEach((c) => c.classList.remove("on"));
+      refreshSubmit();
+    });
+    submitBtn.addEventListener("click", () => {
+      const amt = currentAmount();
+      if (amt && amt >= minDep && amt <= maxDep) submitTopup(amt);
+    });
+    refreshSubmit();
+
+    return el("div", { class: "card fade" }, [
+      el("div", { class: "h-cap", text: T.topupTitle }),
+      el("div", { class: "chips", style: "margin-top:8px" }, chipEls),
+      customInp,
+      hint,
+      el("div", { class: "h-cap", style: "margin-top:12px", text: T.payMethod }),
+      payChips("", {
+        excludeBalance: true,
+        selected: state.topupPaySel,
+        onSelect: (id) => { state.topupPaySel = id; render(); },
+      }),
+      submitBtn,
+    ]);
   }
 
   function orderSections(map) {
@@ -813,9 +922,18 @@
         el("div", { style: "margin-left:auto;text-align:right" }, [
           el("div", { class: "sub", style: "font-size:11px", text: T.balance }),
           el("b", { text: money(me.user.balance_minor) }),
+          me.app.balance_enabled !== false
+            ? el("button", {
+                class: "btn ghost sm",
+                style: "margin-top:6px;padding:3px 10px;font-size:12px",
+                onclick: () => { state.topupOpen = !state.topupOpen; haptic(); render(); },
+                text: T.topupBtn,
+              })
+            : null,
         ]),
       ]),
     );
+    if (state.topupOpen && me.app.balance_enabled !== false) frag.push(topupCard());
     frag.push(
       el("div", { class: "card fade" }, [
         el("div", { class: "li" }, [
@@ -1086,6 +1204,45 @@
       } else if (r.ok) {
         toast(T.bought);
         haptic("ok");
+        load();
+      }
+    } catch (e) {
+      toast((e.message || T.error).slice(0, 120));
+    }
+  }
+
+  async function submitTopup(amountMinor) {
+    haptic();
+    const method = state.topupPaySel || "stars";
+    try {
+      const r = await api("POST", "/api/cabinet/topup", { amount_minor: amountMinor, method });
+      if (r.redirect_url) {
+        wa && wa.openLink ? wa.openLink(r.redirect_url) : window.open(r.redirect_url, "_blank");
+        toast(T === RU ? "Оплати по открывшейся ссылке" : "Complete the payment in the opened page");
+        setTimeout(load, 4000);
+      } else if (r.invoice_link) {
+        if (wa && wa.openInvoice) {
+          wa.openInvoice(r.invoice_link, (status) => {
+            if (status === "paid") {
+              toast(T.topupDone);
+              haptic("ok");
+              state.topupOpen = false;
+              setTimeout(load, 1200);
+            }
+          });
+        } else {
+          // Old Telegram client without WebApp.openInvoice — the Stars invoice was created but
+          // nothing was charged. Must NOT claim success here: /topup never returns a bare
+          // {ok:true} (method "balance" is rejected server-side), so the old `else if (r.ok)`
+          // fallback used to fire on exactly this case and lie that the balance was topped up.
+          toast(T.topupInvoiceUnsupported);
+        }
+      } else if (r.ok) {
+        // Defensive only — kept in case a future server change adds a synchronous success
+        // shape; today /topup only ever returns invoice_link or redirect_url.
+        toast(T.topupDone);
+        haptic("ok");
+        state.topupOpen = false;
         load();
       }
     } catch (e) {

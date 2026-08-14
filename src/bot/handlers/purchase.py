@@ -16,13 +16,16 @@ from typing import TYPE_CHECKING
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 from src.application.dto.pricing import PurchaseRequest
 from src.bot.banners import render_screen
 from src.bot.gate import ensure_channel
 from src.bot.keyboards import simple_keyboard
-from src.bot.screen import ack
+from src.bot.screen import ack, show_screen
+from src.core.constants import MAX_DEPOSIT_AMOUNT_MINOR
 from src.core.enums import Currency, PurchaseType, TransactionStatus, TransactionType
 from src.core.exceptions import (
     DomainError,
@@ -157,12 +160,21 @@ async def show_durations(cb: CallbackQuery, container: AppContainer, db_user: Us
 
 
 async def _payment_methods(
-    uow: UnitOfWork, container: AppContainer, db_user: User, price_minor: int
+    uow: UnitOfWork,
+    container: AppContainer,
+    db_user: User,
+    price_minor: int,
+    *,
+    include_balance: bool = True,
 ) -> list[tuple[str, str]]:
     """(label, method_code) pairs for a payment screen, respecting the config toggles.
 
     Order + the Balance/Stars labels are operator-controlled (PAYMENT_METHOD_ORDER /
     PAYMENT_BALANCE_LABEL / PAYMENT_STARS_LABEL) and shared with the mini-app.
+
+    ``include_balance=False`` drops the "pay from balance" entry even when BALANCE_ENABLED is
+    on — used by the top-up screen itself, where paying from balance to fund the balance makes
+    no sense.
     """
     from src.core.payment_order import order_rank
 
@@ -175,7 +187,7 @@ async def _payment_methods(
 
     # (label, method_code, order_id) — order_id is the stable name used in PAYMENT_METHOD_ORDER.
     entries: list[tuple[str, str, str]] = []
-    if balance_enabled:
+    if balance_enabled and include_balance:
         ok = "✅" if db_user.balance_minor >= price_minor else "❌"
         entries.append((f"{ok} {bal_label} ({fmt_money(db_user.balance_minor)})", "bal", "balance"))
     stars = max(1, math.ceil(price_minor / max(1, stars_rate)))
@@ -653,7 +665,7 @@ async def _pay_with_balance(
             container,
             "balance",
             "\n".join(lines),
-            simple_keyboard([("⭐ Пополнить", "topup:menu"), ("‹ Меню", "nav:root")]),
+            simple_keyboard([("💳 Пополнить", "topup:menu"), ("‹ Меню", "nav:root")]),
         )
         await cb.answer()
         return
@@ -785,9 +797,13 @@ async def traffic_pay(cb: CallbackQuery, container: AppContainer, db_user: User)
     await _start_payment(cb, container, req, method)
 
 
-# --- balance top-up (Telegram Stars deposit) -----------------------------------
+# --- balance top-up (Stars or any connected gateway) ---------------------------
 
 _TOPUP_PRESETS_RUB = (100, 250, 500, 1000)
+
+
+class TopupForm(StatesGroup):
+    waiting_amount = State()
 
 
 @router.callback_query(F.data == "topup:menu")
@@ -799,28 +815,150 @@ async def topup_menu(cb: CallbackQuery, container: AppContainer, db_user: User) 
             await cb.answer("Пополнение баланса отключено", show_alert=True)
             return
         min_dep = int(await container.bot_config.value(uow, "MIN_DEPOSIT_AMOUNT"))
-        stars_rate = int(await container.bot_config.value(uow, "STARS_RATE_RUB"))
     amounts_minor = [r * 100 for r in _TOPUP_PRESETS_RUB if r * 100 >= min_dep] or [min_dep]
-    rows = []
-    for minor in amounts_minor:
-        stars = max(1, math.ceil(minor / max(1, stars_rate)))
-        rows.append((f"{fmt_money(minor)} · {stars} ★", f"topup:{minor}"))
+    rows = [(fmt_money(minor), f"topup:{minor}") for minor in amounts_minor]
+    rows.append(("✏️ Своя сумма", "topup:custom"))
     rows.append(("‹ Назад", "act:balance:0"))
     await render_screen(
         cb,
         container,
         "topup",
         "<b>💳 Пополнение баланса</b>\n\n"
-        "Зачислим через Telegram Stars.\nВыбери сумму — звёзды указаны в кнопках.",
+        "Выбери сумму — способ оплаты (Stars, карта, СБП…) выберешь на следующем шаге.",
         simple_keyboard(rows),
     )
     await cb.answer()
 
 
+@router.callback_query(F.data == "topup:custom")
+async def topup_custom_prompt(
+    cb: CallbackQuery, container: AppContainer, db_user: User, state: FSMContext
+) -> None:
+    """ "Своя сумма" -> arm the FSM and ask for a plain-text amount in rubles.
+
+    ``purchase.router`` runs ``ClearStaleForm`` on every callback, so any earlier stray form is
+    already gone by the time this handler sets its own state — and tapping any other button on
+    this router (including the Cancel button below) clears this one the same way.
+    """
+    async with container.uow() as uow:
+        if not bool(await container.bot_config.value(uow, "BALANCE_ENABLED")):
+            await cb.answer("Пополнение баланса отключено", show_alert=True)
+            return
+        min_dep = int(await container.bot_config.value(uow, "MIN_DEPOSIT_AMOUNT"))
+    await state.set_state(TopupForm.waiting_amount)
+    await show_screen(
+        cb,
+        "<b>✏️ Своя сумма</b>\n\n"
+        f"Пришли сумму пополнения в рублях, целым числом — от {fmt_money(max(1, min_dep))} "
+        f"до {fmt_money(MAX_DEPOSIT_AMOUNT_MINOR)}.",
+        simple_keyboard([("‹ Отмена", "topup:menu")]),
+    )
+    await cb.answer()
+
+
+@router.message(TopupForm.waiting_amount, F.text & ~F.text.startswith("/"))
+async def topup_custom_amount(
+    message: Message, container: AppContainer, db_user: User, state: FSMContext
+) -> None:
+    """Free-text amount entry. Commands are excluded from the filter above (a stray ``/support``
+    while this form is armed must reach the ticket router, not get read as an amount) and a
+    self-clean guard below caps how long a truly non-numeric reply keeps the form armed — without
+    either, the form (in Redis, surviving restarts) swallows every later message the user sends,
+    forever, until they tap an inline button (see ``purchase.router`` vs ``tickets.py``'s
+    catch-all, which refuses to fire while any state is active).
+    """
+    from src.bot.handlers.reply_menu import maybe_dispatch_menu_button
+
+    # A bottom-bar tap (reply mode) reaches here before reply_menu — don't take it as an amount.
+    if await maybe_dispatch_menu_button(message, container, db_user, state):
+        return
+    async with container.uow() as uow:
+        if not bool(await container.bot_config.value(uow, "BALANCE_ENABLED")):
+            await state.clear()
+            await message.answer("Пополнение баланса отключено")
+            return
+        min_dep = int(await container.bot_config.value(uow, "MIN_DEPOSIT_AMOUNT"))
+    raw = (message.text or "").strip().replace(" ", "")
+    # isdecimal(), not isdigit(): isdigit() is also true for digit-*like* characters int() can't
+    # parse (e.g. "²", a superscript) — that used to raise ValueError below and crash the handler
+    # into the global error reporter on every retry. isdecimal() matches exactly what int() accepts.
+    if not raw.isdecimal():
+        data = await state.get_data()
+        misses = int(data.get("misses", 0)) + 1
+        if misses >= 2:
+            # Two non-amount replies in a row — this is very likely a stray message (a question,
+            # small talk) rather than a typo retry, so drop the form instead of waiting forever:
+            # same self-cleaning promo.py/withdraw.py already do on any input to their own forms.
+            # One retry is still allowed (unlike promo/withdraw) so a plain typo doesn't force the
+            # user back through "✏️ Своя сумма" to try again.
+            await state.clear()
+            await message.answer(
+                "Нужно целое число рублей, например <code>3000</code>. "
+                "Нажми «✏️ Своя сумма» ещё раз, если хочешь пополнить баланс.",
+                parse_mode="HTML",
+            )
+            return
+        await state.update_data(misses=misses)
+        await message.answer(
+            "Нужно целое число рублей, например <code>3000</code>. Пришли ещё раз:",
+            parse_mode="HTML",
+        )
+        return
+    amount_minor = int(raw) * 100
+    if amount_minor < max(1, min_dep):
+        await message.answer(f"Минимальное пополнение — {fmt_money(min_dep)}. Пришли другую сумму:")
+        return
+    if amount_minor > MAX_DEPOSIT_AMOUNT_MINOR:
+        await message.answer(
+            f"Максимальное пополнение — {fmt_money(MAX_DEPOSIT_AMOUNT_MINOR)}. Пришли другую сумму:"
+        )
+        return
+    await state.clear()
+    await _show_topup_methods(message, container, db_user, amount_minor)
+
+
+async def _show_topup_methods(
+    target: CallbackQuery | Message, container: AppContainer, db_user: User, amount_minor: int
+) -> None:
+    """The payment-method screen for a top-up amount — shared by a preset-button tap and the
+    custom-amount form, so both land on the exact same screen/validation.
+
+    Never offers "pay from balance" — that would fund the wallet from itself.
+    """
+    async with container.uow() as uow:
+        methods = await _payment_methods(
+            uow, container, db_user, amount_minor, include_balance=False
+        )
+    rows = [(label, f"topupm:{amount_minor}:{code}") for label, code in methods]
+    # The amount also lives in a button, not just the caption above: an operator's SCREEN_TEXTS
+    # override for "topup_method" (banners._apply_overrides) replaces the WHOLE caption, and could
+    # easily drop the "amount due" line. This row is a dynamic button — screen_buttons.SAFE_SCREENS
+    # only registers "topup:menu" (the back button) as an editable static button for this screen —
+    # so apply_screen_buttons always carries it through byte-for-byte; the amount can't disappear
+    # even from a screen whose text an operator fully rewrote. Tapping it is a harmless no-op.
+    rows.insert(0, (f"💰 К зачислению: {fmt_money(amount_minor)}", "topup:amt"))
+    rows.append(("‹ Назад", "topup:menu"))
+    await render_screen(
+        target,
+        container,
+        "topup_method",
+        f"<b>💳 Пополнение баланса</b>\n\nК зачислению: <b>{fmt_money(amount_minor)}</b>\n\n"
+        "Выбери способ оплаты.",
+        simple_keyboard(rows),
+    )
+
+
+@router.callback_query(F.data == "topup:amt")
+async def topup_amount_pill(cb: CallbackQuery) -> None:
+    """The amount readout button above — purely informational, just swallow the tap."""
+    await cb.answer()
+
+
 @router.callback_query(F.data.startswith("topup:"))
 async def topup_amount(cb: CallbackQuery, container: AppContainer, db_user: User) -> None:
+    """Amount picked -> show the payment-method screen (mirrors ``choose_payment``)."""
     parts = (cb.data or "").split(":")
-    if len(parts) < 2 or not parts[1].isdigit():
+    if len(parts) < 2 or not parts[1].isdecimal():
         await cb.answer("Некорректная сумма", show_alert=True)
         return
     amount_minor = int(parts[1])
@@ -829,12 +967,82 @@ async def topup_amount(cb: CallbackQuery, container: AppContainer, db_user: User
             await cb.answer("Пополнение баланса отключено", show_alert=True)
             return
         min_dep = int(await container.bot_config.value(uow, "MIN_DEPOSIT_AMOUNT"))
-        stars_rate = int(await container.bot_config.value(uow, "STARS_RATE_RUB"))
-    # Callback data is forgeable — re-validate against the config, not the button.
+    # Callback data is forgeable — re-validate against the config/ceiling, not the button. No
+    # upper bound here used to mean a crafted amount could reach a real provider invoice for
+    # millions, or overflow the transaction's bigint column further down the pipeline.
     if amount_minor < max(1, min_dep):
         await cb.answer(f"Минимальное пополнение — {fmt_money(min_dep)}", show_alert=True)
         return
+    if amount_minor > MAX_DEPOSIT_AMOUNT_MINOR:
+        await cb.answer(
+            f"Максимальное пополнение — {fmt_money(MAX_DEPOSIT_AMOUNT_MINOR)}", show_alert=True
+        )
+        return
+    await _show_topup_methods(cb, container, db_user, amount_minor)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("topupm:"))
+async def topup_pay(cb: CallbackQuery, container: AppContainer, db_user: User) -> None:
+    """Method picked -> Stars invoice or a hosted gateway link, per ``pay``/``_start_payment``."""
+    parts = (cb.data or "").split(":")
+    if len(parts) != 3 or not parts[1].isdecimal():
+        await topup_menu(cb, container, db_user)
+        return
+    amount_minor, method = int(parts[1]), parts[2]
     async with container.uow() as uow:
+        if not bool(await container.bot_config.value(uow, "BALANCE_ENABLED")):
+            await cb.answer("Пополнение баланса отключено", show_alert=True)
+            return
+        min_dep = int(await container.bot_config.value(uow, "MIN_DEPOSIT_AMOUNT"))
+        # Re-validate again — this callback data carries the same forgeable amount as
+        # topup_amount's (and the same overflow risk on the uncapped side).
+        if amount_minor < max(1, min_dep):
+            await cb.answer(f"Минимальное пополнение — {fmt_money(min_dep)}", show_alert=True)
+            return
+        if amount_minor > MAX_DEPOSIT_AMOUNT_MINOR:
+            await cb.answer(
+                f"Максимальное пополнение — {fmt_money(MAX_DEPOSIT_AMOUNT_MINOR)}", show_alert=True
+            )
+            return
+        # The method must be one _payment_methods actually offers for this amount/user — a
+        # crafted "manual"/"telegram_stars"/anything-not-listed code must not reach the gateway
+        # lookup in _topup_with_gateway just because it happens not to return REDIRECT.
+        offered = {
+            code
+            for _label, code in await _payment_methods(
+                uow, container, db_user, amount_minor, include_balance=False
+            )
+        }
+    if method not in offered:
+        await cb.answer("Этот способ оплаты сейчас недоступен", show_alert=True)
+        return
+    await _start_topup(cb, container, db_user, amount_minor, method)
+
+
+async def _start_topup(
+    cb: CallbackQuery, container: AppContainer, db_user: User, amount_minor: int, method: str
+) -> None:
+    """Same double-tap guard as ``_start_payment`` — one lock per user covers both a purchase
+    and a top-up, since either one can be mid-flight when the other tap lands."""
+    if not await container.redis.set(f"paylock:{db_user.id}", "1", nx=True, ex=90):
+        await cb.answer("Платёж уже обрабатывается — секунду…", show_alert=True)
+        return
+    try:
+        if method == "stars":
+            await _topup_with_stars(cb, container, db_user, amount_minor)
+        else:
+            await _topup_with_gateway(cb, container, db_user, amount_minor, method)
+    finally:
+        with contextlib.suppress(Exception):
+            await container.redis.delete(f"paylock:{db_user.id}")
+
+
+async def _topup_with_stars(
+    cb: CallbackQuery, container: AppContainer, db_user: User, amount_minor: int
+) -> None:
+    async with container.uow() as uow:
+        stars_rate = int(await container.bot_config.value(uow, "STARS_RATE_RUB"))
         txn = Transaction(
             user_id=db_user.id,
             type=TransactionType.DEPOSIT,
@@ -866,6 +1074,92 @@ async def topup_amount(cb: CallbackQuery, container: AppContainer, db_user: User
                 await uow.commit()
             await cb.answer("Не удалось создать счёт — попробуй другую сумму", show_alert=True)
             return
+    await cb.answer()
+
+
+async def _topup_with_gateway(
+    cb: CallbackQuery, container: AppContainer, db_user: User, amount_minor: int, method: str
+) -> None:
+    """Hosted top-up: pending DEPOSIT tx -> provider invoice -> «Оплатить» button.
+
+    Mirrors ``_pay_with_gateway`` but skips ``purchase.start()`` — that always books a
+    SUBSCRIPTION_PAYMENT transaction. A top-up is a plain DEPOSIT; PaymentService._fulfill
+    already credits any DEPOSIT regardless of which gateway settled it, so nothing else changes.
+    """
+    from src.application.common.payments import PaymentContext, PaymentResultKind
+    from src.application.services.pay_forms import split_method
+    from src.core.enums import PaymentGatewayType
+    from src.core.money import Money
+    from src.infrastructure.payments.crypto import decrypt_gateway_settings
+
+    gateway_value, form = split_method(method)  # "platega@sbp" -> ("platega", "sbp")
+    try:
+        gtype = PaymentGatewayType(gateway_value)
+    except ValueError:
+        await cb.answer("Неизвестный способ оплаты", show_alert=True)
+        return
+    async with container.uow() as uow:
+        row = await uow.payment_gateways.get_active(gtype)
+        if row is None or gtype not in container.gateway_factory.supported():
+            await cb.answer("Способ оплаты выключен", show_alert=True)
+            return
+        settings = decrypt_gateway_settings(container.secret_box, dict(row.settings))
+        gateway = container.gateway_factory.create(gtype, settings)
+        txn = Transaction(
+            user_id=db_user.id,
+            type=TransactionType.DEPOSIT,
+            status=TransactionStatus.PENDING,
+            amount_minor=amount_minor,
+            currency=Currency.RUB,
+        )
+        await uow.transactions.add(txn)  # flushes -> txn.payment_id assigned below
+        try:
+            result = await gateway.create_payment(
+                PaymentContext(
+                    payment_id=txn.payment_id,
+                    amount=Money(amount_minor, txn.currency),
+                    description="Пополнение баланса",
+                    user_id=db_user.id,
+                    telegram_id=cb.from_user.id if cb.from_user else None,
+                    metadata={"form": form} if form else {},
+                )
+            )
+        except Exception as exc:
+            log.error("gateway create failed", gateway=method, error=str(exc))
+            await cb.answer("Платёжка временно недоступна, попробуй другой способ", show_alert=True)
+            return  # no commit -> the flushed PENDING txn rolls back with the session
+        if result.kind is not PaymentResultKind.REDIRECT or not result.redirect_url:
+            await cb.answer("Платёжка не вернула ссылку на оплату", show_alert=True)
+            return  # no commit -> rollback, same as above
+        txn.gateway_type = gtype
+        txn.external_id = result.external_id
+        txn.gateway_display_name = row.display_name or gtype.value
+        await uow.commit()
+        pay_url = result.redirect_url
+        label = row.display_name or gtype.value
+
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"💳 Оплатить · {label}", url=pay_url)],
+            [
+                InlineKeyboardButton(
+                    text="🔄 Проверить оплату", callback_data=f"paycheck:{txn.payment_id}"
+                )
+            ],
+            [InlineKeyboardButton(text="‹ Меню", callback_data="nav:root")],
+        ]
+    )
+    await render_screen(
+        cb,
+        container,
+        "topup_invoice",
+        "<b>💳 Счёт создан</b>\n\n"
+        "Оплати по кнопке ниже — баланс пополнится автоматически сразу после оплаты ⚡\n"
+        "Если оплатил, а баланс не изменился — жми «Проверить оплату».",
+        markup,
+    )
     await cb.answer()
 
 

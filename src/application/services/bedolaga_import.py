@@ -555,6 +555,13 @@ class BedolagaImportService:
                 gateway_type=_GATEWAY_MAP.get(method),
                 gateway_display_name=_text(method, 64) or "bedolaga",
                 completed_at=_to_utc(row.get("completed_at")) or created,
+                # Historical money from BEFORE this bot existed — never a candidate for a fresh
+                # "Мой налог" receipt under THIS INN. `created` above falls back to "now" when
+                # the dump has no date, which would otherwise land squarely inside
+                # list_unreceipted's lookback window; pre-stamping receipt_created_at (normally
+                # an in-flight filing claim) permanently excludes the row from that query without
+                # a schema change — nothing else in the app reads this field.
+                receipt_created_at=dt.datetime.now(dt.UTC),
             )
             await uow.transactions.add(txn)
             txn.created_at = created

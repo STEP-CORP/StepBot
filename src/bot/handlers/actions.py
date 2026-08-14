@@ -514,12 +514,12 @@ async def act_balance(cb: CallbackQuery | Message, container: AppContainer, db_u
     text = (
         "<b>💳 Баланс</b>\n\n"
         f"На счету: <b>{fmt_money(db_user.balance_minor)}</b>\n\n"
-        f"Пополни через Telegram Stars — от <b>{fmt_money(min_dep)}</b>.\n"
+        f"Пополни от <b>{fmt_money(min_dep)}</b> — Stars, картой, СБП и другими способами.\n"
         "С баланса подписка оплачивается в один тап."
     )
     markup = simple_keyboard(
         [
-            ("⭐ Пополнить", "topup:menu"),
+            ("💳 Пополнить", "topup:menu"),
             ("🆘 Поддержка", "act:support:0"),
             ("‹ Кабинет", "act:cabinet:0"),
         ]

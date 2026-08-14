@@ -8,6 +8,7 @@
  *   GET  /api/cabinet/referral
  *   POST /api/cabinet/promocode          { code }
  *   POST /api/cabinet/purchase           { public_code, days }
+ *   POST /api/cabinet/topup              { amount_minor, method }
  *   POST /api/cabinet/subscription/reset-devices
  *
  * Auth: every request carries `Authorization: tma <initData>` (Telegram Mini Apps).
@@ -89,6 +90,13 @@
     }
     return req("POST", "/api/cabinet/subscription/reset-devices");
   }
+  async function topup(amountMinor, method) {
+    if (useMock) {
+      await delay(400);
+      return { ok: true, invoice_link: null, redirect_url: null };
+    }
+    return req("POST", "/api/cabinet/topup", { amount_minor: amountMinor, method });
+  }
 
   Cabinet.api = {
     useMock,
@@ -98,5 +106,6 @@
     applyPromo,
     purchase,
     resetDevices,
+    topup,
   };
 })();

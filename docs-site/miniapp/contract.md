@@ -41,6 +41,7 @@ Authorization: tma <initData>
 | `DELETE /api/cabinet/devices/{hwid}` | tma | Отвязать устройство |
 | `GET /api/cabinet/support` · `POST /api/cabinet/support` | tma | Чат поддержки (история / новое сообщение) |
 | `POST /api/cabinet/purchase` | tma | Покупка/продление тарифа |
+| `POST /api/cabinet/topup` | tma | Пополнение баланса (Stars / онлайн-шлюз) |
 | `POST /api/cabinet/promocode` | tma | Активация промокода |
 | `POST /api/cabinet/trial` | tma | Активация пробного периода |
 | `POST /api/cabinet/subscription/reset-devices` (алиас `reset-link`) | tma | Ротация ссылки подписки + сброс сессий |
@@ -81,7 +82,9 @@ Authorization: tma <initData>
     "balance_enabled": true,
     "hide_subscription_link": false,
     "show_traffic_usage": true,
-    "sales_mode": "plans"              // plans | constructor
+    "sales_mode": "plans",             // plans | constructor
+    "min_deposit_minor": 5000,         // MIN_DEPOSIT_AMOUNT — минимум для POST /topup
+    "max_deposit_minor": 100000000     // фиксированный потолок (не настраивается) — максимум для POST /topup
   },
   "subscription": {                    // null, если подписки не было
     "status": "active",                // trial|active|limited|expired|disabled|pending
@@ -175,7 +178,20 @@ HWID-устройства, привязанные к panel-юзеру текущ
 { "ok": true, "redirect_url": "https://yoomoney.ru/pay/…" }   // онлайн-шлюз → страница оплаты
 ```
 
-Онлайн-оплату завершает вебхук провайдера через стандартный идемпотентный пайплайн — эндпоинт сам ничего не фулфиллит. Ошибки: `402` — недостаточно баланса, `409` — уже обработано, `502` — провайдер/панель недоступны.
+Онлайн-оплату завершает вебхук провайдера через стандартный идемпотентный пайплайн — эндпоинт сам ничего не фулфиллит. Ошибки: `402` — недостаточно баланса, `409` — уже обработано, `502` — провайдер/панель/Stars-инвойс недоступны (для Stars уже созданная `PENDING`-транзакция переводится в `CANCELED`, а не остаётся висеть).
+
+### POST /topup
+
+Пополнение баланса: `{ "amount_minor": 50000, "method": "stars" }`. `method` — `stars` или тип онлайн-шлюза из `me.app.payment_methods` (например `yookassa` или `platega@sbp`); **`"balance"` не принимается** — баланс нельзя пополнить с самого себя.
+
+Создаётся транзакция типа `DEPOSIT` (не `SUBSCRIPTION_PAYMENT` — это не покупка тарифа); ответ зависит от метода:
+
+```jsonc
+{ "ok": true, "invoice_link": "https://t.me/$abc" }           // Stars → openInvoice()
+{ "ok": true, "redirect_url": "https://yoomoney.ru/pay/…" }   // онлайн-шлюз → страница оплаты
+```
+
+Зачисление на баланс происходит по тому же идемпотентному пайплайну, что и оплату тарифа (вебхук / `successful_payment` → `PaymentService`), эндпоинт сам ничего не зачисляет. Сумма проверяется на сервере с обеих сторон: не ниже `MIN_DEPOSIT_AMOUNT` (`me.app.min_deposit_minor`) и не выше фиксированного потолка `me.app.max_deposit_minor`. `method` также сверяется с тем, что реально отдаёт `me.app.payment_methods` — присланный код вне этого списка (включая `manual`/`telegram_stars`, которые туда никогда не попадают) отклоняется. Ошибки: `400` — сумма ниже минимума или выше максимума, метод `balance`, неизвестный/не входящий в список метод, кошелёк выключен (`BALANCE_ENABLED=false`) или способ оплаты не включён, `502` — провайдер/Stars-инвойс недоступны (транзакция при этом переводится в `CANCELED`, а не остаётся вечным `PENDING`).
 
 ### POST /promocode
 

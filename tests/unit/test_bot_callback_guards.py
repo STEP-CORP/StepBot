@@ -42,6 +42,8 @@ class _FakeCb:
         ("constructor_pay", "show_constructor", "cpay:1:2"),
         ("traffic_pack_pay", "traffic_menu", "tpack:x"),
         ("traffic_pay", "traffic_menu", "tpay:x:bal"),
+        ("topup_pay", "topup_menu", "topupm:1"),  # wrong arity
+        ("topup_pay", "topup_menu", "topupm:x:stars"),  # non-numeric amount
     ],
 )
 async def test_crafted_callback_falls_back_without_raising(

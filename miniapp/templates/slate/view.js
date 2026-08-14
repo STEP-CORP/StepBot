@@ -1,7 +1,7 @@
 /* Slate presentation. Native Telegram grouped-list layout over the shared view-model. */
 (function () {
   "use strict";
-  const { t } = Cabinet;
+  const { t, fmt } = Cabinet;
   const root = document.getElementById("app");
 
   function el(tag, props, kids) {
@@ -103,13 +103,65 @@
     );
   }
 
+  // Inline preset segments + a free-typed custom amount, both feeding Cabinet.actions.topup().
+  // A real in-page field, not window.prompt() — Telegram's in-app WebView doesn't implement
+  // it (many clients resolve it to null immediately), so the old "Пополнить" button used to
+  // do nothing at all.
+  function topupComposer(m) {
+    const presets = Cabinet.actions.topupPresets(m);
+    const sel = { i: 0 };
+    const input = el("input", { class: "inp", type: "text", inputmode: "decimal", placeholder: t("topupPrompt") });
+    const note = el("div", { class: "note" });
+    const submitBtn = el("button", { class: "btn link", style: "width:auto", text: t("topUp") });
+    const seg = presets.length
+      ? el(
+          "div",
+          { class: "seg", style: "margin:0 16px 12px" },
+          presets.map((minor, i) =>
+            el("button", {
+              class: i === sel.i ? "on" : "",
+              onclick: () => {
+                sel.i = i;
+                input.value = "";
+                syncSeg();
+              },
+              text: fmt.money(minor, m.currency),
+            })
+          )
+        )
+      : null;
+    function syncSeg() {
+      if (!seg) return;
+      Array.from(seg.children).forEach((c, i) => c.classList.toggle("on", i === sel.i && !input.value.trim()));
+    }
+    input.addEventListener("input", syncSeg);
+    submitBtn.addEventListener("click", async () => {
+      const raw = input.value.trim() || (presets.length ? String(presets[sel.i] / 100) : "");
+      const parsed = Cabinet.actions.parseTopupAmount(m, raw);
+      if (parsed.error) {
+        note.className = "note bad";
+        note.textContent = parsed.error;
+        return;
+      }
+      submitBtn.disabled = true;
+      const r = await Cabinet.actions.topup(parsed.minor);
+      submitBtn.disabled = false;
+      const res = Cabinet.actions.topupResultMessage(r);
+      note.className = "note " + (res.ok ? "ok" : "bad");
+      note.textContent = res.message;
+      if (res.ok) render(await Cabinet.load());
+    });
+    return [seg, row([input, submitBtn]), note].filter(Boolean);
+  }
+
   function balance(m) {
-    return group(
-      t("balance"),
-      el("div", { class: "section" }, [
-        row([el("div", { class: "row-label" }, [el("div", { class: "row-title", text: m.user.balanceLabel, style: "font-weight:700;font-size:22px" })]), el("button", { class: "btn", style: "width:auto;padding:9px 18px", onclick: () => toast(t("topUp") + " →"), text: t("topUp") })]),
-      ])
-    );
+    const items = [
+      row([el("div", { class: "row-label" }, [el("div", { class: "row-title", text: m.user.balanceLabel, style: "font-weight:700;font-size:22px" })])]),
+    ];
+    // #2: the owner turned the wallet off (BALANCE_ENABLED=false) — no top-up field, not just
+    // a hidden button, since /topup would 400 on every submit anyway.
+    if (m.balanceEnabled) items.push(...topupComposer(m));
+    return group(t("balance"), el("div", { class: "section" }, items));
   }
 
   function planBlock(m, p) {

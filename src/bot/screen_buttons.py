@@ -78,7 +78,7 @@ SAFE_SCREENS: tuple[ScreenDef, ...] = (
         "Баланс",
         "Balance",
         (
-            SysButton("topup:menu", "⭐ Пополнить"),
+            SysButton("topup:menu", "💳 Пополнить"),
             SysButton("act:support", "🆘 Поддержка"),
             SysButton("act:cabinet", "‹ Кабинет"),
         ),
@@ -152,9 +152,29 @@ SAFE_SCREENS: tuple[ScreenDef, ...] = (
     ),
     ScreenDef(
         "topup",
-        "Пополнение баланса",
-        "Top up",
+        "Пополнение баланса: сумма",
+        "Top up: amount",
         (SysButton("act:balance", "‹ Назад"),),
+    ),
+    ScreenDef(
+        # Was folded into "topup" (three different renders sharing one key — an owner's saved
+        # text/buttons for the amount screen leaked onto method selection and vice versa).
+        # Split into its own key: method selection is a distinct screen in the funnel.
+        "topup_method",
+        "Пополнение баланса: способ",
+        "Top up: method",
+        (SysButton("topup:menu", "‹ Назад"),),
+    ),
+    ScreenDef(
+        # Also split out of "topup" — the "invoice created" screen used to inherit both the
+        # amount screen's saved text (losing "Счёт создан") and its custom buttons (which would
+        # render ABOVE the real "Оплатить" button). Only the static back-to-menu button is in the
+        # safe registry here, same as "devices": the "Оплатить" url + "Проверить оплату" buttons
+        # carry a per-invoice url/payment_id and are never reusable across renders.
+        "topup_invoice",
+        "Пополнение баланса: счёт",
+        "Top up: invoice",
+        (SysButton("nav:root", "‹ Меню"),),
     ),
     ScreenDef(
         "traffic",

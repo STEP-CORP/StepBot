@@ -11,6 +11,7 @@ import contextlib
 import math
 from collections.abc import Iterable
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -25,7 +26,16 @@ from src.application.services.connection import (
 )
 from src.application.services.ids import generate_referral_code
 from src.application.services.promo import PromoError
-from src.core.enums import Currency, Locale, PurchaseType, UserStatus
+from src.bot.handlers.purchase import fmt_money  # single source for money labels (#7)
+from src.core.constants import MAX_DEPOSIT_AMOUNT_MINOR
+from src.core.enums import (
+    Currency,
+    Locale,
+    PurchaseType,
+    TransactionStatus,
+    TransactionType,
+    UserStatus,
+)
 from src.core.exceptions import (
     DomainError,
     InsufficientBalance,
@@ -36,6 +46,7 @@ from src.core.logging import get_logger
 from src.core.money import Money
 from src.core.security import validate_init_data
 from src.infrastructure.database.models.plan import Plan
+from src.infrastructure.database.models.transaction import Transaction
 from src.infrastructure.database.models.user import User
 from src.infrastructure.di import AppContainer
 from src.infrastructure.payments.crypto import decrypt_gateway_settings
@@ -46,6 +57,10 @@ log = get_logger(__name__)
 router = APIRouter(prefix="/api/cabinet", tags=["cabinet"])
 
 GIB = 1024**3
+
+# MAX_DEPOSIT_AMOUNT_MINOR (self-serve top-up ceiling) now lives in src/core/constants.py —
+# shared with the bot's own topup flow (src/bot/handlers/purchase.py) so the two surfaces
+# can never drift apart.
 
 
 def _gateway_methods(gateways: Iterable[Any], supported: Iterable[Any]) -> list[dict[str, str]]:
@@ -167,6 +182,7 @@ async def me(
         sales_mode = str(await cfg.value(uow, "SALES_MODE"))
         hide_link = bool(await cfg.value(uow, "HIDE_SUBSCRIPTION_LINK"))
         show_traffic = bool(await cfg.value(uow, "SHOW_TRAFFIC_USAGE"))
+        min_deposit_minor = int(await cfg.value(uow, "MIN_DEPOSIT_AMOUNT"))
         gateways = _gateway_methods(
             await uow.payment_gateways.list(), container.gateway_factory.supported()
         )
@@ -212,6 +228,13 @@ async def me(
             "hide_subscription_link": hide_link,
             "show_traffic_usage": show_traffic,  # #8: honored by bot; now exposed to cabinets too
             "sales_mode": sales_mode,
+            # MIN_DEPOSIT_AMOUNT — floor the top-up UI must respect when building its amount
+            # presets; the /topup endpoint re-validates it server-side regardless (#topup).
+            "min_deposit_minor": max(1, min_deposit_minor),
+            # Fixed ceiling (not admin-configurable, see src/core/constants.py) — lets the
+            # top-up UI validate a free-typed custom amount client-side before it round-trips
+            # to a 400 (#3/#4). /topup re-validates it server-side regardless.
+            "max_deposit_minor": MAX_DEPOSIT_AMOUNT_MINOR,
         },
     }
 
@@ -500,17 +523,41 @@ async def purchase(
         stars = max(1, math.ceil(quote.final.amount_minor / max(1, stars_rate)))
 
     from aiogram import Bot
+    from aiogram.exceptions import TelegramAPIError
     from aiogram.types import LabeledPrice
 
     bot = Bot(token=container.settings.bot.token)
     try:
-        link = await bot.create_invoice_link(
-            title=f"{title} · {req.duration_days} дн.",
-            description="Оплата VPN-подписки",
-            payload=payment_id,
-            currency="XTR",
-            prices=[LabeledPrice(label="VPN", amount=stars)],
-        )
+        try:
+            link = await bot.create_invoice_link(
+                title=f"{title} · {req.duration_days} дн.",
+                description="Оплата VPN-подписки",
+                payload=payment_id,
+                currency="XTR",
+                prices=[LabeledPrice(label="VPN", amount=stars)],
+            )
+        except TelegramAPIError as exc:
+            # Same orphan-PENDING-transaction hazard as /topup below — the txn was already
+            # committed above (start() needs it to exist before quoting), so a refused invoice
+            # must cancel it rather than leave a permanent «⏳» in the user's history (#1).
+            # TelegramAPIError (not just TelegramBadRequest) — create_invoice_link can just as
+            # well fail on a network blip, a flood-control retry-after, or the bot token being
+            # revoked; aiogram wraps all three (plus a plain bad-request) under this one base,
+            # so a narrower catch left the transaction stranded PENDING forever on any of them.
+            log.warning(
+                "cabinet purchase invoice failed",
+                amount_minor=quote.final.amount_minor,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            async with container.uow() as uow:
+                await uow.transactions.transition_status(
+                    UUID(payment_id), TransactionStatus.CANCELED, (TransactionStatus.PENDING,)
+                )
+                await uow.commit()
+            raise HTTPException(
+                502, "failed to create the Stars invoice — try again or another payment method"
+            ) from exc
     finally:
         await bot.session.close()
     return {"ok": True, "invoice_link": link}
@@ -534,6 +581,16 @@ async def _pay_with_gateway(
         raise HTTPException(400, "unknown payment method") from exc
 
     async with container.uow() as uow:
+        gateways = await uow.payment_gateways.list()
+        offered = {
+            m["id"] for m in _gateway_methods(gateways, container.gateway_factory.supported())
+        }
+        if method not in offered:
+            # Cross-check against exactly what /me's payment_methods (built by this same
+            # _gateway_methods()) advertise — "manual"/"telegram_stars" pass the type+is_active
+            # checks below but are deliberately excluded from the offered list (#5); previously
+            # only "the gateway never returns REDIRECT" happened to save us here.
+            raise HTTPException(400, "payment method is not enabled")
         row = await uow.payment_gateways.get_active(gtype)
         if row is None or gtype not in container.gateway_factory.supported():
             raise HTTPException(400, "payment method is not enabled")
@@ -557,6 +614,163 @@ async def _pay_with_gateway(
                     payment_id=txn.payment_id,
                     amount=Money(quote.final.amount_minor, txn.currency),
                     description=f"{title} · {req.duration_days} дн.",
+                    user_id=user.id,
+                    telegram_id=user.telegram_id,
+                    return_url=miniapp_url or None,
+                    metadata={"form": form} if form else {},
+                )
+            )
+        except Exception as exc:
+            log.error("gateway create_payment failed", gateway=method, error=str(exc))
+            raise HTTPException(502, f"panel error: provider {method} failed") from exc
+        if result.kind is not PaymentResultKind.REDIRECT or not result.redirect_url:
+            raise HTTPException(502, f"provider {method} returned no payment url")
+        txn.gateway_type = gtype
+        txn.external_id = result.external_id
+        txn.gateway_display_name = row.display_name or gtype.value
+        await uow.commit()
+        return {"ok": True, "redirect_url": result.redirect_url}
+
+
+class TopupIn(BaseModel):
+    # Upper bound checked in the handler (not here) so it shares the 400 code path with the
+    # rest of this endpoint's errors instead of a bare pydantic 422 (#topup-max-code).
+    amount_minor: int = Field(..., gt=0)
+    method: str = Field(..., max_length=32)  # stars | <gateway type>[@form] — never "balance"
+
+
+@router.post("/topup")
+async def topup(
+    body: TopupIn,
+    user: User = Depends(cabinet_user),
+    container: AppContainer = Depends(get_container),
+) -> dict[str, Any]:
+    """Wallet top-up: pending DEPOSIT tx -> Stars invoice or gateway redirect.
+
+    Unlike /purchase this never touches ``PurchaseService.start()`` (always
+    SUBSCRIPTION_PAYMENT) — the transaction is built here as a plain DEPOSIT, exactly like the
+    bot's ``topup_amount`` handler. Fulfilment (crediting the balance) is generic: any COMPLETED
+    DEPOSIT transaction is credited by ``PaymentService._fulfill`` regardless of its source.
+    """
+    if body.method == "balance":
+        raise HTTPException(400, "cannot top up the balance from the balance")
+
+    async with container.uow() as uow:
+        if not bool(await container.bot_config.value(uow, "BALANCE_ENABLED")):
+            # Old UI / cached responses could still show a top-up button after the owner turns
+            # the wallet off — refuse here, or the money lands in a wallet nothing credits.
+            raise HTTPException(400, "balance top-ups are disabled")
+        min_dep = int(await container.bot_config.value(uow, "MIN_DEPOSIT_AMOUNT"))
+        stars_rate = int(await container.bot_config.value(uow, "STARS_RATE_RUB"))
+
+    # amount_minor is client-supplied and forgeable — re-validate the floor AND ceiling
+    # server-side, never trust the UI preset the request claims to have used. Both bounds
+    # raise the same 400 (not pydantic's 422 for the upper one) — consistent with every other
+    # error on this endpoint and with the documented contract (#4).
+    if body.amount_minor < max(1, min_dep):
+        raise HTTPException(400, "amount below the minimum top-up")
+    if body.amount_minor > MAX_DEPOSIT_AMOUNT_MINOR:
+        raise HTTPException(400, "amount above the maximum top-up")
+
+    txn = Transaction(
+        user_id=user.id,
+        type=TransactionType.DEPOSIT,
+        status=TransactionStatus.PENDING,
+        amount_minor=body.amount_minor,
+        currency=Currency.RUB,
+    )
+
+    if body.method != "stars":
+        return await _topup_with_gateway(container, user, txn, body.method)
+
+    # Stars: pending tx + invoice link opened via Telegram.WebApp.openInvoice.
+    async with container.uow() as uow:
+        await uow.transactions.add(txn)
+        await uow.commit()
+        payment_id = str(txn.payment_id)
+    stars = max(1, math.ceil(body.amount_minor / max(1, stars_rate)))
+
+    from aiogram import Bot
+    from aiogram.exceptions import TelegramAPIError
+    from aiogram.types import LabeledPrice
+
+    bot = Bot(token=container.settings.bot.token)
+    try:
+        try:
+            link = await bot.create_invoice_link(
+                title="Пополнение баланса",
+                description=f"Пополнение на {fmt_money(body.amount_minor)}",
+                payload=payment_id,
+                currency="XTR",
+                prices=[LabeledPrice(label="Баланс", amount=stars)],
+            )
+        except TelegramAPIError as exc:
+            # Invoice refused (amount out of Telegram's limits, bot blocked, network hiccup…) —
+            # cancel the orphan PENDING txn instead of stranding it as an eternal «⏳ Пополнение»
+            # that list_stuck_pending() can never pick up (no gateway_type/external_id on a Stars
+            # row). Mirrors the bot's own _topup_with_stars (src/bot/handlers/purchase.py) (#1).
+            # TelegramAPIError (not just TelegramBadRequest) — aiogram wraps network errors and
+            # flood-control retry-after under this same base, and a revoked/unauthorized bot
+            # token raises TelegramUnauthorizedError, not TelegramBadRequest; the narrower catch
+            # let every one of those slip past `except` and 500 out with the txn stuck PENDING.
+            log.warning(
+                "cabinet topup invoice failed",
+                amount_minor=body.amount_minor,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            async with container.uow() as uow:
+                await uow.transactions.transition_status(
+                    UUID(payment_id), TransactionStatus.CANCELED, (TransactionStatus.PENDING,)
+                )
+                await uow.commit()
+            raise HTTPException(
+                502, "failed to create the Stars invoice — try again or another amount"
+            ) from exc
+    finally:
+        await bot.session.close()
+    return {"ok": True, "invoice_link": link}
+
+
+async def _topup_with_gateway(
+    container: AppContainer, user: User, txn: Transaction, method: str
+) -> dict[str, Any]:
+    """Hosted top-up: pending DEPOSIT tx -> provider invoice -> redirect URL.
+
+    Mirrors ``_pay_with_gateway`` above; the provider webhook completes the transaction
+    through the standard idempotent pipeline, crediting the balance — nothing is fulfilled
+    here.
+    """
+    from src.application.services.pay_forms import split_method
+    from src.core.enums import PaymentGatewayType
+
+    gateway_value, form = split_method(method)  # "platega@sbp" -> ("platega", "sbp")
+    try:
+        gtype = PaymentGatewayType(gateway_value)
+    except ValueError as exc:
+        raise HTTPException(400, "unknown payment method") from exc
+
+    async with container.uow() as uow:
+        gateways = await uow.payment_gateways.list()
+        offered = {
+            m["id"] for m in _gateway_methods(gateways, container.gateway_factory.supported())
+        }
+        if method not in offered:
+            # See the matching guard in _pay_with_gateway above (#5).
+            raise HTTPException(400, "payment method is not enabled")
+        row = await uow.payment_gateways.get_active(gtype)
+        if row is None or gtype not in container.gateway_factory.supported():
+            raise HTTPException(400, "payment method is not enabled")
+        settings = decrypt_gateway_settings(container.secret_box, dict(row.settings))
+        await uow.transactions.add(txn)
+        miniapp_url = str(await container.bot_config.value(uow, "SUBSCRIPTION_MINI_APP_URL") or "")
+        gateway = container.gateway_factory.create(gtype, settings)
+        try:
+            result = await gateway.create_payment(
+                PaymentContext(
+                    payment_id=txn.payment_id,
+                    amount=Money(txn.amount_minor, txn.currency),
+                    description=f"Пополнение баланса · {fmt_money(txn.amount_minor)}",
                     user_id=user.id,
                     telegram_id=user.telegram_id,
                     return_url=miniapp_url or None,

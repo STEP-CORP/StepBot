@@ -153,6 +153,9 @@ async def process_payment(
     if settled_status is TransactionStatus.COMPLETED:
         await _notify_paid(container, pid)
         await _try_auto_purchase(container, pid)
+        # An overpayment admin alert (if any) already fired inside PaymentService.process —
+        # the one common layer every settlement path shares (this task, the reconciler, and the
+        # bot's on-demand "Проверить оплату"), so it can't depend on which one settled it.
     elif settled_status in (TransactionStatus.FAILED, TransactionStatus.CANCELED):
         # The txn just went terminal-negative — the buyer is otherwise never told.
         await _notify_payment_negative(
@@ -338,6 +341,44 @@ async def _notify_payment_negative(
                 f"(minor units). Транзакция переведена в FAILED — нужен возврат/разбор.",
                 topic="payments",
             )
+
+
+async def _notify_overpayment_admins(
+    container: object, payment_id: UUID, *, expected_minor: int, received_minor: int
+) -> None:
+    """Alert admins that a settled webhook reported MORE than the invoice — an editable-sum
+    quickpay form (or a manual overpay) let the payer send extra. Symmetric to the underpayment
+    alert in ``_notify_payment_negative``, but there is no separate buyer DM here: PaymentService
+    already credited the actual amount received (single source of truth for the balance, the
+    referral reward and the fiscal receipt), so ``_notify_paid``'s own DM already shows the
+    correct, higher figure. This is purely a heads-up for a human to check it wasn't a mistake
+    worth refunding — no money is ever left uncredited or unaccounted for.
+
+    No longer called from a production path (superseded by ``PaymentService._alert_overpay``,
+    the single common layer every settlement path now shares — see the cap/mutation logic in
+    ``PaymentService.process``). Left in place because an existing unit test exercises this
+    exact function directly.
+    """
+    import contextlib
+    from typing import cast
+
+    from src.infrastructure.di import AppContainer
+    from src.infrastructure.services.reports import fmt_amount
+
+    c = cast(AppContainer, container)
+    async with c.uow() as uow:
+        txn = await uow.transactions.get_by_payment_id(payment_id)
+        if txn is None:
+            return
+        currency = txn.currency.value
+    with contextlib.suppress(Exception):
+        await c.notifier.notify_admins(
+            f"\U0001f4b8 Переплата по счёту {payment_id}: ожидалось "
+            f"{fmt_amount(expected_minor, currency)}, получено "
+            f"{fmt_amount(received_minor, currency)}. Зачислена фактически полученная сумма — "
+            "проверьте, не ошибся ли плательщик.",
+            topic="payments",
+        )
 
 
 async def _notify_paid(container: object, payment_id: UUID) -> None:
@@ -574,6 +615,9 @@ async def _reconcile_pending(
                 # Same post-completion side effects as the live webhook path (tasks.py:48-50):
                 # a recovered top-up must still complete its stashed smart-cart purchase (#5).
                 await _try_auto_purchase(container, txn.payment_id)
+                # An overpayment admin alert (if any) already fired inside PaymentService.process
+                # — the same common layer the live webhook task and "Проверить оплату" share, so
+                # there is no separate stale-``txn`` expected-amount check to keep in sync here.
             elif settled_status in (TransactionStatus.FAILED, TransactionStatus.CANCELED):
                 await _notify_payment_negative(
                     container,

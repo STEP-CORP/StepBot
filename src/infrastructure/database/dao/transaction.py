@@ -39,18 +39,37 @@ class TransactionDAO(BaseDAO[Transaction]):
     async def list_unreceipted(
         self, *, newer_than: dt.datetime, limit: int = 50
     ) -> list[Transaction]:
-        """Completed external subscription payments still without a fiscal receipt."""
+        """Completed external money-in transactions still without a fiscal receipt.
+
+        Covers gateway-paid subscriptions (as before) AND gateway top-ups of the wallet
+        (DEPOSIT) — real acquiring now funds top-ups too, and that money needs a "Мой налог"
+        receipt exactly like a direct purchase. ``gateway_type IS NOT NULL`` is the load-bearing
+        filter here: a balance-funded purchase (``PurchaseService.checkout_from_balance``) never
+        stamps it, so spending an already-receipted top-up on a subscription can never file a
+        second receipt for the same money. A Telegram Stars top-up also leaves it NULL (no
+        gateway_type is ever stamped on that flow) — Stars aren't cash/card money through a
+        fiscal register, so they correctly stay out of this query, same as before this change.
+        """
         stmt = (
             select(Transaction)
             .where(
                 Transaction.status == TransactionStatus.COMPLETED,
-                Transaction.type == TransactionType.SUBSCRIPTION_PAYMENT,
+                Transaction.type.in_(
+                    (TransactionType.SUBSCRIPTION_PAYMENT, TransactionType.DEPOSIT)
+                ),
                 Transaction.gateway_type.is_not(None),
                 Transaction.amount_minor > 0,
                 Transaction.receipt_uuid.is_(None),
                 # receipt_created_at is stamped as an "in-flight" claim BEFORE the irreversible
                 # fiscal registration, so a crash between filing and the receipt_uuid write can't
-                # re-file the same income on the next run (nalogo idempotency).
+                # re-file the same income on the next run (nalogo idempotency). The importers
+                # (shopbot_import / bedolaga_import / remnashop_import) reuse the SAME field as a
+                # permanent "never file" marker: they insert rows straight into COMPLETED (never
+                # through PaymentService's CAS), often WITHOUT a source date — which would
+                # otherwise fall back to "now" and land inside this query's 3-day window. A
+                # historical top-up/purchase from someone else's bot must never get registered as
+                # today's income under THIS INN, so the importers pre-stamp receipt_created_at at
+                # insert time and this filter excludes them exactly like an in-flight row.
                 Transaction.receipt_created_at.is_(None),
                 Transaction.created_at > newer_than,
             )

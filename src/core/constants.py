@@ -13,7 +13,7 @@ UNLIMITED_EXPIRE_YEAR: Final = 2099
 BYTES_PER_GB: Final = 1024**3
 
 # --- identifiers -----------------------------------------------------------
-APP_VERSION: Final = "1.14.1"  # shipped with Remnawave 3.0 support; bump on release
+APP_VERSION: Final = "1.15.0"  # bump on release
 SHORT_ID_LENGTH: Final = 10  # permanent per-subscription suffix (max column width 16)
 REFERRAL_CODE_LENGTH: Final = 8
 
@@ -33,6 +33,9 @@ TELEGRAM_UPDATE_CONCURRENCY: Final = 100  # semaphore slots for webhook update p
 
 # --- money / discounts -----------------------------------------------------
 MAX_DISCOUNT_PERCENT: Final = 100
+# Top-up ceiling shared by the cabinet API and the bot's top-up flow — callback data / request
+# bodies are forgeable, so both surfaces re-validate against this instead of trusting the client.
+MAX_DEPOSIT_AMOUNT_MINOR: Final = 100_000_000  # 1,000,000 RUB
 
 # --- system actor ----------------------------------------------------------
 SYSTEM_ACTOR_ID: Final = -1

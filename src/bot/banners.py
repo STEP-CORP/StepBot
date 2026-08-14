@@ -40,6 +40,8 @@ _SCREEN_BANNER_KEY: dict[str, str] = {
     "traffic": "BANNER_TRAFFIC",
     "balance": "BANNER_BALANCE",
     "topup": "BANNER_BALANCE",
+    "topup_method": "BANNER_BALANCE",
+    "topup_invoice": "BANNER_BALANCE",
     "referral": "BANNER_REFERRAL",
     "support": "BANNER_SUPPORT",
     "trial": "BANNER_TRIAL",

@@ -74,6 +74,18 @@
     }
   }
 
+  /** Open a Telegram Stars invoice link. Resolves "unsupported" on an old client without
+   * WebApp.openInvoice — the caller must NOT treat that as a paid/failed status. */
+  function openInvoice(link) {
+    return new Promise((resolve) => {
+      if (wa && typeof wa.openInvoice === "function") {
+        wa.openInvoice(link, (status) => resolve(status));
+      } else {
+        resolve("unsupported");
+      }
+    });
+  }
+
   /** Open a tg://, happ:// or other deep link (subscription import). */
   function openDeepLink(url) {
     if (wa && url.startsWith("https://t.me") && typeof wa.openTelegramLink === "function") {
@@ -109,6 +121,7 @@
     haptic,
     copy,
     openLink,
+    openInvoice,
     openDeepLink,
     share,
     initDataAuthHeader,
