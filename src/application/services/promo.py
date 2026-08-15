@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from src.application.dto.pricing import PurchaseRequest
 from src.core.enums import Availability, Currency, PurchaseType, RewardType
 from src.core.exceptions import DomainError
+from src.core.logging import get_logger
 from src.infrastructure.database.models.promo_group import UserPromoGroup
 from src.infrastructure.database.models.promocode import Promocode, PromocodeActivation
 from src.infrastructure.database.models.user import User
@@ -21,6 +22,8 @@ from src.infrastructure.database.models.user import User
 if TYPE_CHECKING:
     from src.application.services.subscription import SubscriptionService
     from src.infrastructure.database.uow import UnitOfWork
+
+log = get_logger(__name__)
 
 _WALLET_REWARDS = {
     RewardType.BALANCE,
@@ -128,8 +131,34 @@ class PromoService:
             case RewardType.PURCHASE_DISCOUNT:
                 user.purchase_discount_pct = promo.reward_value
             case RewardType.PROMO_GROUP if promo.promo_group_id is not None:
-                uow.session.add(
-                    UserPromoGroup(user_id=user.id, promo_group_id=promo.promo_group_id)
+                # Membership is a composite PK (user_id, promo_group_id); a second code for
+                # the same group (bulk-generated invites, see routes/admin/promos.py) or a
+                # prior campaign attribution (see bot/handlers/start.py) can already have
+                # put the user in this group — re-adding it must be a no-op, not an
+                # IntegrityError the generic error handler turns into an opaque 500.
+                #
+                # Two *different* codes for the same group redeemed concurrently race here:
+                # the promocode-row lock above doesn't help (different rows). Lock the user
+                # row instead (same pattern as the trial double-tap guard) so the loser of
+                # the race sees the winner's committed membership before deciding to insert.
+                await uow.users.lock_for_update(user.id)
+                existing = await uow.session.get(
+                    UserPromoGroup,
+                    {"user_id": user.id, "promo_group_id": promo.promo_group_id},
                 )
+                if existing is None:
+                    uow.session.add(
+                        UserPromoGroup(user_id=user.id, promo_group_id=promo.promo_group_id)
+                    )
+            case RewardType.PROMO_GROUP:
+                # Data left over from before the create-time validation was added (or a
+                # group deleted from under a live code) — the operator needs to rebind a
+                # group in the cabinet; the buyer just needs a plain-language apology.
+                log.error(
+                    "promo group reward has no bound promo_group_id",
+                    promocode_id=promo.id,
+                    code=promo.code,
+                )
+                raise PromoError("промокод временно не работает, мы уже разбираемся")
             case _:
                 raise PromoError("unsupported wallet reward")

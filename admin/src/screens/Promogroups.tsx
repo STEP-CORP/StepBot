@@ -19,9 +19,11 @@ type Group = {
   auto_assign_total_spent_minor: number | null;
   apply_discounts_to_addons: boolean;
   members: number;
+  promocodes: number;
+  campaigns: number;
 };
 
-const NEW: Omit<Group, "id" | "members"> = {
+const NEW: Omit<Group, "id" | "members" | "promocodes" | "campaigns"> = {
   name: "",
   priority: 0,
   is_default: false,
@@ -43,7 +45,7 @@ export default function Promogroups() {
     queryFn: () => api.get<{ items: Group[] }>("/api/admin/promogroups"),
   });
   const [adding, setAdding] = useState(false);
-  const [nw, setNw] = useState<Omit<Group, "id" | "members">>({ ...NEW });
+  const [nw, setNw] = useState<Omit<Group, "id" | "members" | "promocodes" | "campaigns">>({ ...NEW });
   const [draft, setDraft] = useState<Record<number, Partial<Group>>>({});
 
   const refresh = () => void qc.invalidateQueries({ queryKey: ["promogroups"] });
@@ -55,7 +57,7 @@ export default function Promogroups() {
     return { ...g, ...(draft[g.id] ?? {}) };
   }
 
-  function body(g: Omit<Group, "id" | "members">) {
+  function body(g: Omit<Group, "id" | "members" | "promocodes" | "campaigns">) {
     return {
       name: g.name.trim(),
       priority: g.priority,
@@ -97,7 +99,15 @@ export default function Promogroups() {
   }
 
   async function remove(g: Group) {
-    if (!(await confirm(g.members > 0 ? t.groupDeleteMembers : t.deleteConfirm))) return;
+    // The delete itself is refused server-side while active promocodes/campaigns are
+    // still bound (see routes/admin/promos.py) — this dialog just shows the operator
+    // the full blast radius up front instead of them finding out from a 409 toast.
+    const bits: string[] = [];
+    if (g.members > 0) bits.push(`${t.members}: ${g.members}`);
+    if (g.promocodes > 0) bits.push(`${t.groupPromoCount}: ${g.promocodes}`);
+    if (g.campaigns > 0) bits.push(`${t.groupCampaignCount}: ${g.campaigns}`);
+    const question = bits.length ? `${t.groupDeleteImpact} (${bits.join(", ")}). ${t.deleteConfirm}` : t.deleteConfirm;
+    if (!(await confirm(question))) return;
     try {
       await api.del(`/api/admin/promogroups/${g.id}`);
       refresh();
@@ -108,7 +118,7 @@ export default function Promogroups() {
 
   const items = list.data?.items ?? [];
 
-  function discountRow(g: Group | Omit<Group, "id" | "members">, on: (p: Partial<Group>) => void) {
+  function discountRow(g: Group | Omit<Group, "id" | "members" | "promocodes" | "campaigns">, on: (p: Partial<Group>) => void) {
     return (
       <div className="row" style={{ gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <label className="row" style={{ gap: 6 }}>

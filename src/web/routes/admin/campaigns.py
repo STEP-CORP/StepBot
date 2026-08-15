@@ -116,6 +116,15 @@ async def list_campaigns(container: AppContainer = Depends(get_container)) -> di
     return {"items": items}
 
 
+async def _check_group_exists(uow: Any, promo_group_id: int | None) -> None:
+    """A campaign's promo_group_id is optional, but an id that doesn't exist would hit
+    the FK on insert/update (ondelete="SET NULL" doesn't help an id that was never valid)
+    and 500 instead of a legible refusal — same class of bug just fixed for promocodes,
+    see ``_resolve_group_binding`` in ``routes/admin/promos.py``."""
+    if promo_group_id is not None and await uow.promo_groups.get(promo_group_id) is None:
+        raise HTTPException(400, "promo group not found")
+
+
 class CampaignIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     start_param: str = Field(..., min_length=2, max_length=64)
@@ -134,6 +143,7 @@ async def create_campaign(
     async with container.uow() as uow:
         if await uow.campaigns.find_one(start_param=body.start_param):
             raise HTTPException(409, "start_param already in use")
+        await _check_group_exists(uow, body.promo_group_id)
         campaign = Campaign(
             name=body.name,
             start_param=body.start_param,
@@ -165,6 +175,8 @@ async def patch_campaign(
         campaign = await uow.campaigns.get(campaign_id)
         if campaign is None:
             raise HTTPException(404, "campaign not found")
+        if "promo_group_id" in data:
+            await _check_group_exists(uow, data["promo_group_id"])
         for k, v in data.items():
             setattr(campaign, k, v)
         await audit(uow, identity, "campaign.patch", f"campaign:{campaign.start_param}", **data)

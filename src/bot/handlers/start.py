@@ -264,6 +264,11 @@ async def _attribute(container: AppContainer, db_user: User, param: str, *, crea
                 if campaign.promo_group_id is not None:
                     from src.infrastructure.database.models.promo_group import UserPromoGroup
 
+                    # Serialize with PromoService: a promocode for the same group can be
+                    # redeemed concurrently, and the membership PK is composite. Relying on
+                    # the autoflush of `user.campaign_id` to take this row lock would break
+                    # the moment someone reorders these lines.
+                    await uow.users.lock_for_update(user.id)
                     existing = await uow.session.get(
                         UserPromoGroup,
                         {"user_id": user.id, "promo_group_id": campaign.promo_group_id},

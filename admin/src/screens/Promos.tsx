@@ -12,10 +12,12 @@ type Promo = {
   code: string;
   reward_type: string;
   reward_value: number;
+  promo_group_id: number | null;
   used: number;
   max_activations: number | null;
   expires_at: string | null;
   is_active: boolean;
+  broken: boolean;
 };
 type Group = {
   id: number;
@@ -45,6 +47,8 @@ export default function Promos() {
   const [code, setCode] = useState("");
   const [value, setValue] = useState(100);
   const [limit, setLimit] = useState(0);
+  const [groupId, setGroupId] = useState<number | "">("");
+  const [fixGroup, setFixGroup] = useState<Record<number, number | "">>({});
 
   const promos = useQuery({
     queryKey: ["promocodes"],
@@ -91,11 +95,32 @@ export default function Promos() {
       await api.post("/api/admin/promocodes", {
         code,
         reward_type: rewardType,
-        reward_value: rewardType === "balance" ? value * 100 : value,
+        // "group" has no nominal — the input is hidden, but `value` still holds its
+        // stale default (100) and would otherwise land in the DB as junk reward_value.
+        reward_value: rewardType === "group" ? 0 : rewardType === "balance" ? value * 100 : value,
+        promo_group_id: rewardType === "group" ? groupId || null : null,
         max_activations: limit || null,
       });
       setModal(false);
       setCode("");
+      setGroupId("");
+      void qc.invalidateQueries({ queryKey: ["promocodes"] });
+      toast("✓");
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  }
+
+  async function fixBroken(p: Promo) {
+    const gid = fixGroup[p.id];
+    if (!gid) return;
+    try {
+      await api.patch(`/api/admin/promocodes/${p.id}`, { promo_group_id: gid });
+      setFixGroup((s) => {
+        const n = { ...s };
+        delete n[p.id];
+        return n;
+      });
       void qc.invalidateQueries({ queryKey: ["promocodes"] });
       toast("✓");
     } catch (e) {
@@ -130,6 +155,8 @@ export default function Promos() {
     trial: t.rewardTrial,
     group: t.rewardGroup,
   };
+  const groupOptions = groups.data?.items ?? [];
+  const groupName = new Map(groupOptions.map((g) => [g.id, g.name]));
   const r = referral.data;
 
   return (
@@ -168,10 +195,49 @@ export default function Promos() {
             </span>
             <span>
               <span className="cap-pill">{rewardLabel[p.reward_type] ?? p.reward_type}</span>
+              {p.broken && (
+                <div style={{ color: "var(--warn, #e0a800)", fontSize: 11, marginTop: 3 }}>
+                  ⚠️ {t.promoBroken}
+                </div>
+              )}
             </span>
-            <span className="mono">
-              {p.reward_type === "balance" ? money(p.reward_value) : p.reward_value}
-            </span>
+            {p.reward_type === "group" ? (
+              p.broken ? (
+                <span className="row" style={{ gap: 4 }}>
+                  <select
+                    className="input"
+                    style={{ fontSize: 11, padding: "4px 6px" }}
+                    value={fixGroup[p.id] ?? ""}
+                    onChange={(e) =>
+                      setFixGroup((s) => ({
+                        ...s,
+                        [p.id]: e.target.value ? Number(e.target.value) : "",
+                      }))
+                    }
+                  >
+                    <option value="">{t.rewardGroupPh}</option>
+                    {groupOptions.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn secondary sm"
+                    disabled={!fixGroup[p.id]}
+                    onClick={() => void fixBroken(p)}
+                  >
+                    {t.promoFix}
+                  </button>
+                </span>
+              ) : (
+                <span className="mono">{groupName.get(p.promo_group_id ?? -1) ?? "—"}</span>
+              )
+            ) : (
+              <span className="mono">
+                {p.reward_type === "balance" ? money(p.reward_value) : p.reward_value}
+              </span>
+            )}
             <span>
               <div className="mono" style={{ fontSize: 11, marginBottom: 3 }}>
                 {p.used} / {p.max_activations ?? "∞"}
@@ -258,6 +324,27 @@ export default function Promos() {
                 onChange={setRewardType}
               />
             </Field>
+            {rewardType === "group" && (
+              <Field label={t.rewardGroup}>
+                <select
+                  className="input"
+                  value={groupId}
+                  onChange={(e) => setGroupId(e.target.value ? Number(e.target.value) : "")}
+                >
+                  <option value="">{t.rewardGroupPh}</option>
+                  {groupOptions.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+                {groups.data && groupOptions.length === 0 && (
+                  <span className="dim" style={{ fontSize: 11 }}>
+                    {t.rewardGroupEmpty}
+                  </span>
+                )}
+              </Field>
+            )}
             <Field label={t.code}>
               <div className="row">
                 <input
@@ -273,14 +360,16 @@ export default function Promos() {
               </div>
             </Field>
             <div className="row">
-              <Field label={rewardType === "balance" ? `${t.nominal} ₽` : t.nominal}>
-                <input
-                  className="input num"
-                  type="number"
-                  value={value}
-                  onChange={(e) => setValue(Number(e.target.value) || 0)}
-                />
-              </Field>
+              {rewardType !== "group" && (
+                <Field label={rewardType === "balance" ? `${t.nominal} ₽` : t.nominal}>
+                  <input
+                    className="input num"
+                    type="number"
+                    value={value}
+                    onChange={(e) => setValue(Number(e.target.value) || 0)}
+                  />
+                </Field>
+              )}
               <Field label={t.limit0}>
                 <input
                   className="input num"
@@ -294,7 +383,11 @@ export default function Promos() {
               <button className="btn secondary" onClick={() => setModal(false)}>
                 {t.cancel}
               </button>
-              <button className="btn primary" onClick={create}>
+              <button
+                className="btn primary"
+                disabled={rewardType === "group" && !groupId}
+                onClick={create}
+              >
                 {t.create}
               </button>
             </div>

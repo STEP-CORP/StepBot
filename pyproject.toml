@@ -1,6 +1,6 @@
 [project]
 name = "vpn-shop-base"
-version = "1.15.0"
+version = "1.15.1"
 description = "Base/core foundation for a Telegram VPN-shop bot + mini-app on the Remnawave panel"
 readme = "README.md"
 requires-python = ">=3.12"

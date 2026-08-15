@@ -49,6 +49,18 @@ class PromoGroupDAO(BaseDAO[PromoGroup]):
     async def get_default(self) -> PromoGroup | None:
         return await self.find_one(is_default=True)
 
+    async def lock_for_update(self, group_id: int) -> PromoGroup | None:
+        """Row-lock a group (no-op on SQLite, real on Postgres).
+
+        Deletion counts the rows still pointing here; without the lock a promocode
+        bound between the count and the DELETE survives with a NULLed group — live
+        but permanently unredeemable. FOR UPDATE conflicts with the FOR KEY SHARE
+        that the child insert takes, so the racer either waits and gets the 409 or
+        waits and fails on the foreign key.
+        """
+        stmt = select(PromoGroup).where(PromoGroup.id == group_id).with_for_update()
+        return (await self.session.scalars(stmt)).first()
+
 
 class PaymentGatewayDAO(BaseDAO[PaymentGateway]):
     model = PaymentGateway

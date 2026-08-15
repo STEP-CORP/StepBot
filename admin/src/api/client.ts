@@ -32,6 +32,8 @@ const ERR: Record<string, [string, string]> = {
   "code already exists": ["Такой промокод уже существует — сгенерируй другой", "This promo code already exists"],
   "start_param already in use": ["Эта UTM-метка уже занята другой кампанией", "This start param is already used"],
   "plan has subscriptions": ["У тарифа есть активные подписки — выключи его вместо удаления", "This plan has active subscriptions — deactivate it instead"],
+  "promo group is bound to": ["Группу используют активные промокоды или кампании — сначала отвяжи или выключи их", "This group is used by active promocodes or campaigns — unbind or deactivate them first"],
+  "promo group not found": ["Такой промогруппы не существует", "This promo group doesn't exist"],
   "insufficient balance": ["Недостаточно средств на балансе", "Insufficient balance"],
   "user has no subscription": ["У пользователя нет активной подписки", "The user has no active subscription"],
   "cannot block a staff account": ["Нельзя заблокировать администратора", "Staff accounts can't be blocked"],
