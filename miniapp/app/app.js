@@ -9,7 +9,25 @@
   const wa = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   const inTg = !!(wa && wa.initData);
   const params = new URLSearchParams(location.search);
-  const mock = params.get("mock") === "1" || !inTg;
+  const mock = params.get("mock") === "1";
+
+  // Without initData we must NOT fall back to mock.js: users saw a stranger's demo account
+  // (name, balance, payment history) and reported it as a data leak.
+  if (!inTg && !mock) {
+    var scr = document.getElementById("screen");
+    if (scr) {
+      scr.innerHTML =
+        '<div style="padding:48px 24px;text-align:center;font:600 15px/1.55 system-ui,-apple-system,sans-serif;color:inherit">' +
+        '<div style="font-size:44px;margin-bottom:14px">&#128274;</div>' +
+        '<div style="font-size:19px;margin-bottom:10px">Откройте приложение через бота</div>' +
+        '<div style="opacity:.65;font-weight:500">Эта страница работает только внутри Telegram. ' +
+        'Вернитесь в чат с ботом и нажмите «Открыть приложение».</div></div>';
+    }
+    var tabs = document.getElementById("tabs");
+    if (tabs) tabs.style.display = "none";
+    return;
+  }
+
 
   // ---------- i18n ----------
   const RU = {

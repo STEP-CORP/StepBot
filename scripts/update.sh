@@ -43,7 +43,14 @@ run_spin() { # run_spin "подпись" cmd...
 if [ -z "${_VPNHUB_LOCKED:-}" ] && command -v flock >/dev/null 2>&1; then
   # Lock in the repo (bind-mounted identically on host and in the updater sidecar) so a host-run
   # update and the sidecar/6h auto-run actually serialize — /tmp is NOT shared between them.
-  exec env _VPNHUB_LOCKED=1 flock -w 1800 "$(dirname "$0")/../.update.lock" bash "$0" "$@"
+  _lock="$(dirname "$0")/../.update.lock"
+  # The updater sidecar runs on docker:cli (Alpine): its BusyBox flock has no -w/--timeout and
+  # aborts with "unrecognized option: w", which killed every sidecar-triggered update. Probe for
+  # GNU flock and fall back to a plain blocking lock (BusyBox waits by default).
+  if flock --help 2>&1 | grep -q -- '--timeout'; then
+    exec env _VPNHUB_LOCKED=1 flock -w 1800 "$_lock" bash "$0" "$@"
+  fi
+  exec env _VPNHUB_LOCKED=1 flock "$_lock" bash "$0" "$@"
 fi
 
 cd "$(dirname "$0")/.."
