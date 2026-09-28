@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VPN-HUB BOT — one-command install.
+# StepBot — one-command install.
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/STEP-CORP/StepBot/main/scripts/install.sh)
 #
@@ -25,8 +25,8 @@ fail()  { printf "\n  %s✗ %s%s\n" "$RED" "$*" "$R"; exit 1; }
 banner() {
   printf "\n"
   hr
-  printf "   %sVPN%s%s-HUB%s %sBOT%s  %s· установка одной командой%s\n" \
-    "$B" "$R" "$ORANGE$B" "$R" "$B" "$R" "$DIM" "$R"
+  printf "   %sStep%s%sBot%s  %s· установка одной командой%s\n" \
+    "$B" "$R" "$ORANGE$B" "$R" "$DIM" "$R"
   hr
 }
 

@@ -76,11 +76,11 @@ function el(tag, attrs = {}, children = []) {
   return n;
 }
 
-// Owner brand title from /api/cabinet/config (falls back to «VPN HUB» until loaded / if unset).
+// Owner brand title from /api/cabinet/config (falls back to «STEP BOT» until loaded / if unset).
 let brandTitle = "";
 function brand() {
   if (brandTitle) return el("div", { class: "brand" }, [el("span", {}, brandTitle)]);
-  return el("div", { class: "brand" }, [el("span", {}, "VPN"), el("span", { class: "b" }, "HUB")]);
+  return el("div", { class: "brand" }, [el("span", {}, "STEP"), el("span", { class: "b" }, "BOT")]);
 }
 // Social logins the owner actually configured; until /config answers we show none (an
 // unconfigured button used to 400 with "provider not configured" — a dead button).
@@ -506,7 +506,7 @@ async function boot() {
       if (e && e.status === 401) localStorage.removeItem("wc_auto");
     }
   }
-  await loadBrand();  // owner title before first paint (falls back to VPN HUB)
+  await loadBrand();  // owner title before first paint (falls back to STEP BOT)
   view = store.access ? "cabinet" : "auth";
   render();
 }

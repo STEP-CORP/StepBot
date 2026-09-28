@@ -6,7 +6,7 @@ const BASE = process.env.DOCS_BASE || "/";
 
 export default defineConfig({
   lang: "ru-RU",
-  title: "VPN-HUB BOT",
+  title: "StepBot",
   description:
     "Документация конструктора Telegram-ботов для продажи VPN на базе Remnawave",
   base: BASE,

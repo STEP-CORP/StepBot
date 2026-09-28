@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VPN-HUB BOT — safe one-command update.
+# StepBot — safe one-command update.
 #
 #   cd <папка бота> && ./scripts/update.sh
 #
@@ -139,8 +139,8 @@ trap 'exit 143' TERM
 trap recover EXIT
 
 printf "\n"; hr
-printf "   %sVPN%s%s-HUB%s %sBOT%s  %s· безопасное обновление%s\n" \
-  "$B" "$R" "$ORANGE$B" "$R" "$B" "$R" "$DIM" "$R"
+printf "   %sStep%s%sBot%s  %s· безопасное обновление%s\n" \
+  "$B" "$R" "$ORANGE$B" "$R" "$DIM" "$R"
 hr
 
 OLD_REV=$(git rev-parse --short HEAD)

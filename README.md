@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/vpnhub-banner.png" alt="VPN-HUB" width="640">
+<img src="docs/assets/stepbot-banner.png" alt="StepBot" width="640">
 
-# VPN-HUB BOT
+# StepBot
 
 **Конструктор Telegram-ботов для продажи VPN на базе [Remnawave](https://remna.st)**
 
@@ -25,7 +25,7 @@
 
 ## 🧩 Что это?
 
-**VPN-HUB BOT** — платформа из трёх частей поверх общего ядра:
+**StepBot** — платформа из трёх частей поверх общего ядра:
 
 - 🤖 **Telegram-бот** — продажи, триал, баланс, рефералка, тикеты. Меню бота
   (кнопки, цвета, вложенные экраны) собирается в конструкторе кабинета.

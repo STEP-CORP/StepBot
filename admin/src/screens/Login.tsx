@@ -57,7 +57,7 @@ export default function Login() {
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
         <BrandLogo size={22} />
-        <span className="caps">VPN-HUB CABINET</span>
+        <span className="caps">STEPBOT CABINET</span>
         <input
           className="input"
           placeholder={t.username}

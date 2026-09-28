@@ -83,16 +83,16 @@ export function BrandLogo({ size = 15 }: { size?: number }) {
         lineHeight: 1,
       }}
     >
-      <span style={{ color: "var(--text)" }}>VPN</span>
+      <span style={{ color: "var(--text)" }}>STEP</span>
       <span
         style={{
-          background: "#F7971D",
-          color: "#000",
+          background: "#E0251F",
+          color: "#fff",
           borderRadius: size * 0.28,
           padding: `${size * 0.14}px ${size * 0.38}px`,
         }}
       >
-        HUB
+        BOT
       </span>
     </span>
   );

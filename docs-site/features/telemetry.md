@@ -56,7 +56,7 @@ docker compose up -d --build
 
 ## Подключение установки
 
-В `.env` установки HUB-BOT:
+В `.env` установки StepBot:
 
 ```bash
 TELEMETRY__URL=https://errors.<домен>/ingest

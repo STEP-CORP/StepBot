@@ -2,12 +2,12 @@
 layout: home
 
 hero:
-  name: VPN-HUB BOT
+  name: StepBot
   text: Конструктор Telegram-ботов для продажи VPN
   tagline: Remnawave-панель · 21 платёжный провайдер · весь бот собирается в веб-кабинете, без правки кода
   image:
     src: /logo.png
-    alt: VPN-HUB
+    alt: StepBot
   actions:
     - theme: brand
       text: Установить за 5 минут

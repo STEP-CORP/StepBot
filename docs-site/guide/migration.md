@@ -35,7 +35,7 @@
 | `bot.db` | если бот работал в SQLite-режиме (`./data/bot.db`) |
 | `database.sql` или сам архив `backup_YYYYMMDD_HHMMSS.tar.gz` | бот шлёт их в Telegram, либо лежат в `/app/data/backups` |
 | `database.json` | ORM-дамп, если `pg_dump` не было |
-| Postgres DSN | из `.env` бота: `postgresql://remnawave_user:пароль@хост:5432/remnawave_bot` — порт должен быть доступен с сервера HUB-BOT |
+| Postgres DSN | из `.env` бота: `postgresql://remnawave_user:пароль@хост:5432/remnawave_bot` — порт должен быть доступен с сервера StepBot |
 
 Переезжают: балансы (копейки 1:1), подписки с uuid панели (single- и multi-tariff режимы), squad'ы, автоплатёж, платежи (включая маппинг шлюзов, pal24 → paypalych), промокоды (баланс / дни / скидка-процент), рефералы. Панель не трогается.
 

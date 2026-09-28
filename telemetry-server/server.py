@@ -1,4 +1,4 @@
-"""Self-contained error-telemetry ingest server for HUB-BOT installations.
+"""Self-contained error-telemetry ingest server for StepBot installations.
 
 Single file on purpose: deployed standalone (Docker) on the product team's box,
 away from the main repo. Only fastapi / uvicorn / httpx / pydantic + stdlib sqlite3.
@@ -275,8 +275,8 @@ def _render_dashboard(
     toggle = '<a href="./">hide resolved</a>' if show_all else '<a href="./?all=1">show resolved</a>'
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>HUB-BOT telemetry</title><style>{_CSS}</style></head><body>"
-        "<h1>HUB-BOT telemetry</h1>"
+        f"<title>StepBot telemetry</title><style>{_CSS}</style></head><body>"
+        "<h1>StepBot telemetry</h1>"
         f'<div class="meta">open <b>{open_count}</b> · resolved <b>{resolved_count}</b>'
         f" · installs <b>{install_count}</b> · время МСК · {toggle}</div>"
         f"<table><tr>{head}</tr>{rows}</table></body></html>"
@@ -310,7 +310,7 @@ def create_app() -> FastAPI:
                 await task
             conn.close()
 
-    app = FastAPI(title="HUB-BOT telemetry", lifespan=lifespan)
+    app = FastAPI(title="StepBot telemetry", lifespan=lifespan)
 
     def _alert(text: str) -> None:
         # Bounded, non-blocking: drop alerts past the cap so a new-fingerprint burst
