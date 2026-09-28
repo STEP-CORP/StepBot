@@ -1,7 +1,7 @@
 name: Docs
 
 # Validates that the VitePress docs build on every change to docs-site.
-# The canonical docs are self-hosted at docs.vpn-hub.pro (deploy via scripts/deploy-docs.sh);
+# Self-hosted deploy goes through scripts/deploy-docs.sh;
 # GitHub Pages is not used, so this workflow only builds (no deploy step that could fail).
 # To publish a github.io mirror instead: enable Settings → Pages → Source "GitHub Actions",
 # then add back an actions/deploy-pages@v4 job that consumes the built dist.

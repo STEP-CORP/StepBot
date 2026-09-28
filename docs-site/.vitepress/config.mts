@@ -1,8 +1,9 @@
 import { defineConfig } from "vitepress";
 
-// Кастомный домен (docs.vpn-hub.pro) собирается с base "/";
-// GitHub Pages задаёт DOCS_BASE=/StepBot/ в workflow.
+// Свой домен собирается с base "/"; GitHub Pages задаёт DOCS_BASE=/StepBot/ в workflow.
+// DOCS_URL (https://домен) включает sitemap.xml — без него sitemap не строится.
 const BASE = process.env.DOCS_BASE || "/";
+const DOCS_URL = process.env.DOCS_URL;
 
 export default defineConfig({
   lang: "ru-RU",
@@ -11,7 +12,7 @@ export default defineConfig({
     "Документация конструктора Telegram-ботов для продажи VPN на базе Remnawave",
   base: BASE,
   head: [["link", { rel: "icon", type: "image/png", href: `${BASE}logo.png` }]],
-  sitemap: { hostname: "https://docs.vpn-hub.pro" },
+  ...(DOCS_URL ? { sitemap: { hostname: DOCS_URL } } : {}),
   themeConfig: {
     logo: "/logo.png",
     search: { provider: "local" },
@@ -23,7 +24,6 @@ export default defineConfig({
     returnToTopLabel: "Наверх",
     socialLinks: [
       { icon: "github", link: "https://github.com/STEP-CORP/StepBot" },
-      { icon: "telegram", link: "https://t.me/vpnhub_community" },
     ],
     nav: [
       { text: "Установка", link: "/guide/install" },

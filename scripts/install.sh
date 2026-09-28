@@ -33,7 +33,7 @@ banner() {
 # Long-running command with a spinner; full log lands in /tmp, tail shown on failure.
 run_spin() { # run_spin "подпись" cmd...
   local label=$1; shift
-  local log; log=$(mktemp /tmp/vpnhub-install.XXXXXX.log)
+  local log; log=$(mktemp /tmp/stepbot-install.XXXXXX.log)
   printf "  %s…%s %s " "$DIM" "$R" "$label"
   if "$@" >"$log" 2>&1; then
     printf "\r  %s✔%s %s%s\n" "$GREEN" "$R" "$label" "          "
@@ -76,16 +76,16 @@ if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/../docker/compose.prod.yml" ]; th
     ok "клон StepBot уже есть — использую его"
   elif [ -d HUB-BOT/.git ]; then
     ok "клон HUB-BOT уже есть — использую его"
-    cd HUB-BOT; exec env VPNHUB_BOOTSTRAPPED=1 bash scripts/install.sh
+    cd HUB-BOT; exec env STEPBOT_BOOTSTRAPPED=1 bash scripts/install.sh
   else
     run_spin "git clone STEP-CORP/StepBot" git clone --depth 1 https://github.com/STEP-CORP/StepBot.git StepBot
   fi
   cd StepBot
-  exec env VPNHUB_BOOTSTRAPPED=1 bash scripts/install.sh
+  exec env STEPBOT_BOOTSTRAPPED=1 bash scripts/install.sh
 fi
 
 cd "$SCRIPT_DIR/.."
-[ -n "${VPNHUB_BOOTSTRAPPED:-}" ] || banner
+[ -n "${STEPBOT_BOOTSTRAPPED:-}" ] || banner
 note "Требования: 1 vCPU / 1–2 GB RAM (создаём swap автоматически)"
 
 # --- [1/5] prerequisites --------------------------------------------------------

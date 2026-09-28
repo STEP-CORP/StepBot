@@ -24,7 +24,7 @@ run_spin() { # run_spin "подпись" cmd...
   # Template must END in X's: busybox mktemp (the updater sidecar is alpine-based) rejects a
   # suffix after them with "mktemp: : Invalid argument". That aborted step 3 on every
   # button-triggered update — the sidecar path — while host runs (GNU mktemp) worked fine.
-  local log; log=$(mktemp /tmp/vpnhub-update.XXXXXX)
+  local log; log=$(mktemp /tmp/stepbot-update.XXXXXX)
   printf "  %s…%s %s " "$DIM" "$R" "$label"
   if "$@" >"$log" 2>&1; then
     printf "\r  %s✔%s %s%s\n" "$GREEN" "$R" "$label" "          "
@@ -40,10 +40,10 @@ run_spin() { # run_spin "подпись" cmd...
 # Serialize updates: a host run and the sidecar (or the 6 h auto-check) must never
 # `docker compose build/up` the same project at once — concurrent recreation races the stack.
 # Re-exec under an flock; a second run waits up to 30 min, then gives up. Skipped if flock absent.
-if [ -z "${_VPNHUB_LOCKED:-}" ] && command -v flock >/dev/null 2>&1; then
+if [ -z "${_STEPBOT_LOCKED:-}" ] && command -v flock >/dev/null 2>&1; then
   # Lock in the repo (bind-mounted identically on host and in the updater sidecar) so a host-run
   # update and the sidecar/6h auto-run actually serialize — /tmp is NOT shared between them.
-  exec env _VPNHUB_LOCKED=1 flock -w 1800 "$(dirname "$0")/../.update.lock" bash "$0" "$@"
+  exec env _STEPBOT_LOCKED=1 flock -w 1800 "$(dirname "$0")/../.update.lock" bash "$0" "$@"
 fi
 
 cd "$(dirname "$0")/.."

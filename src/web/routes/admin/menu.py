@@ -251,7 +251,7 @@ async def export_menu(container: AppContainer = Depends(get_container)) -> dict[
         nodes = list(await uow.menu_nodes.tree())
         config = {k: await container.bot_config.value(uow, k) for k in _snapshot_config_keys()}
     return {
-        "kind": "vpnhub-bot-menu",
+        "kind": "stepbot-menu",
         "version": 1,
         "nodes": _serialize(nodes),
         "config": config,
