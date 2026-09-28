@@ -8,6 +8,8 @@ Dual-contract: Remnawave 3.0 replaced the user uuid with a numeric id, renamed i
 to connections and dropped the by-telegram-id route. The client probes the panel version
 once (``/api/system/metadata``) and routes every user-scoped call through the matching
 contract, so the rest of the app never learns which panel generation it talks to.
+3.1 through 3.4 only added fields and routes on top of the 3.0 contract (checked up to 3.4.4),
+so every 3.x panel goes through the same ``_PATHS_V3`` table.
 """
 
 from __future__ import annotations
